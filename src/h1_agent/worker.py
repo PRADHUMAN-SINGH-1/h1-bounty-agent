@@ -10,6 +10,7 @@ from .research import LowImpactResearch, flatten
 from .scope import normalize_scopes
 from .store import Store
 from .models import Evidence
+from .asset_intelligence import analyze_asset
 from .recon_diff import compare_surfaces
 from .research_memory import make_memory
 
@@ -56,6 +57,40 @@ def _select_targets(scopes, max_targets: int, *, exhaustive: bool = False):
     return targets
 
 
+def _select_research_assets(scopes, max_assets: int, *, exhaustive: bool = False):
+    seen: set[str] = set()
+    assets = []
+    ordered = sorted(
+        scopes,
+        key=lambda asset: (
+            0 if asset.eligible_for_bounty else 1,
+            str(asset.asset_type).upper(),
+            str(asset.asset_identifier).lower(),
+        ),
+    )
+    for asset in ordered:
+        if not asset.eligible_for_submission or not asset.eligible_for_bounty:
+            continue
+        if asset.instruction:
+            continue
+        identifier = asset.asset_identifier.strip()
+        if not identifier or identifier in seen:
+            continue
+        seen.add(identifier)
+        assets.append(asset)
+        if len(assets) >= max_assets:
+            break
+    return assets
+
+
+def _select_targets(scopes, max_targets: int, *, exhaustive: bool = False):
+    return [
+        (asset, target)
+        for asset in _select_research_assets(scopes, max_targets, exhaustive=exhaustive)
+        if (target := _target_for_asset(asset))
+    ]
+
+
 def _research_program(
     settings: Settings,
     api: HackerOneClient,
@@ -75,6 +110,7 @@ def _research_program(
         "checks_run": 0,
         "findings": [],
         "skipped": [],
+        "asset_types": {},
         "status": "ok",
     }
 
@@ -82,26 +118,39 @@ def _research_program(
     scopes = normalize_scopes(scopes_payload)
     store.save_scopes(handle, scopes_payload)
 
-    exhaustive = deep and not active
-    targets = _select_targets(scopes, max_targets, exhaustive=exhaustive)
+    selected_assets = _select_research_assets(
+        scopes,
+        max_targets,
+        exhaustive=deep and not active,
+    )
     if on_progress:
-        on_progress({"program": handle, "target": None, "planned_targets": len(targets), "completed_targets": 0})
-    if not targets:
+        on_progress({
+            "program": handle,
+            "target": None,
+            "planned_targets": len(selected_assets),
+            "completed_targets": 0,
+        })
+    if not selected_assets:
         result["status"] = "blocked"
-        result["skipped"].append("No eligible structured-scope URL/domain assets without program-specific instructions.")
+        result["skipped"].append("No eligible structured-scope assets available for research.")
         return result
 
     llm = LLMClient(settings)
     llm_available = llm.available()
 
-    for index, (asset, target) in enumerate(targets, start=1):
+    for index, asset in enumerate(selected_assets, start=1):
+        target = _target_for_asset(asset) or asset.asset_identifier.strip()
+        result["asset_types"][asset.asset_type] = result["asset_types"].get(asset.asset_type, 0) + 1
+
         if on_progress:
             on_progress({
                 "program": handle,
                 "target": target,
-                "planned_targets": len(targets),
+                "asset_type": asset.asset_type,
+                "planned_targets": len(selected_assets),
                 "completed_targets": index - 1,
             })
+
         existing = store.list_findings()
         if any(
             row.get("program_handle") == handle
@@ -112,73 +161,98 @@ def _research_program(
             result["skipped"].append(f"Existing finding queue entry for {target}")
             continue
 
-        engine = LowImpactResearch(settings, scopes)
-        try:
-            evidence_results = engine.run(target, active=active, deep=deep)
-        except Exception as exc:
-            result["skipped"].append(f"{target}: {exc}")
-            continue
-        finally:
-            engine.close()
+        evidence_results = []
+        evidence: list[Evidence] = []
+
+        if target.startswith(("http://", "https://")) and asset.asset_type.upper() in {"URL", "DOMAIN", "WILDCARD", "WEB", "WEBSITE"}:
+            engine = LowImpactResearch(settings, scopes)
+            try:
+                evidence_results = engine.run(target, active=active, deep=deep)
+                evidence = flatten(evidence_results)
+            except Exception as exc:
+                result["skipped"].append(f"{target}: {exc}")
+                continue
+            finally:
+                engine.close()
+
+            current_surface = sorted({
+                item.source
+                for item in evidence
+                if item.name == "attack_surface_endpoint"
+                and item.source.startswith(("http://", "https://"))
+            })
+            snapshot = store.save_surface_snapshot(f"{handle}:{target}", current_surface)
+            delta = compare_surfaces(snapshot["previous"], snapshot["current"])
+            if delta.added:
+                evidence.append(
+                    Evidence(
+                        "surface_delta_added",
+                        f"New attack-surface items since last research: {', '.join(delta.added[:50])}",
+                        target,
+                    )
+                )
+            if delta.removed:
+                evidence.append(
+                    Evidence(
+                        "surface_delta_removed",
+                        f"Removed attack-surface items since last research: {', '.join(delta.removed[:50])}",
+                        target,
+                    )
+                )
+
+        else:
+            analysis = analyze_asset(asset, settings)
+            evidence = analysis.evidence
+            evidence_results = [
+                type("AssetCheck", (), {
+                    "name": f"asset_intelligence:{asset.asset_type.lower()}",
+                    "status": analysis.status,
+                    "detail": analysis.detail,
+                })()
+            ]
+            if analysis.status in {"manual", "skipped"}:
+                result["skipped"].append(f"{target}: {analysis.detail}")
+                result["targets_checked"] += 1
+                result["evidence_collected"] += len(evidence)
+                result["checks_run"] += 1
+                continue
 
         result["targets_checked"] += 1
-        evidence = flatten(evidence_results)
-        if on_progress:
-            on_progress({
-                "program": handle,
-                "target": target,
-                "planned_targets": len(targets),
-                "completed_targets": index,
-                "evidence_collected": len(evidence),
-            })
-
-        current_surface = sorted({
-            item.source
-            for item in evidence
-            if item.name == "attack_surface_endpoint" and item.source.startswith(("http://", "https://"))
-        })
-        snapshot = store.save_surface_snapshot(f"{handle}:{target}", current_surface)
-        delta = compare_surfaces(snapshot["previous"], snapshot["current"])
-        if delta.added:
-            evidence.append(
-                Evidence(
-                    "surface_delta_added",
-                    f"New attack-surface items since last research: {', '.join(delta.added[:50])}",
-                    target,
-                )
-            )
-        if delta.removed:
-            evidence.append(
-                Evidence(
-                    "surface_delta_removed",
-                    f"Removed attack-surface items since last research: {', '.join(delta.removed[:50])}",
-                    target,
-                )
-            )
+        result["evidence_collected"] += len(evidence)
+        result["checks_run"] += len(evidence_results)
 
         memory_items = [
             make_memory(
                 f"{target}:research-mode",
-                "active" if active else "passive",
+                "active" if active else "full-read-only",
                 "worker",
             ).__dict__,
             make_memory(
-                f"{target}:surface-count",
-                str(len(current_surface)),
+                f"{target}:evidence-count",
+                str(len(evidence)),
                 "worker",
             ).__dict__,
         ]
         store.save_memory(f"{handle}:{target}", memory_items)
 
         evidence_json = [item.__dict__ for item in evidence]
-        result["evidence_collected"] = result.get("evidence_collected", 0) + len(evidence_json)
-        result["checks_run"] = result.get("checks_run", 0) + len(evidence_results)
         result["research_trace"] = {
             "checks": [item.name for item in evidence_results],
             "evidence_count": len(evidence_json),
             "deep": deep,
             "active": active,
+            "asset_type": asset.asset_type,
         }
+
+        if on_progress:
+            on_progress({
+                "program": handle,
+                "target": target,
+                "asset_type": asset.asset_type,
+                "planned_targets": len(selected_assets),
+                "completed_targets": index,
+                "evidence_collected": len(evidence_json),
+            })
 
         if not llm_available:
             result["skipped"].append(
@@ -210,6 +284,13 @@ def _research_program(
             continue
 
         metadata = {
+            "asset_type": asset.asset_type,
+            "asset_identifier": asset.asset_identifier,
+            "scope_reference": asset.reference or "",
+            "scope_max_severity": asset.max_severity or "",
+            "scope_confidentiality_requirement": asset.confidentiality_requirement or "",
+            "scope_integrity_requirement": asset.integrity_requirement or "",
+            "scope_availability_requirement": asset.availability_requirement or "",
             "affected_component": draft.get("affected_component") or "",
             "preconditions": draft.get("preconditions") or "",
             "observed_behavior": draft.get("observed_behavior") or "",
@@ -221,13 +302,6 @@ def _research_program(
             "cvss_score": draft.get("cvss_score"),
             "cvss_vector": draft.get("cvss_vector") or "",
             "missing_validation": draft.get("missing_validation") or [],
-            "asset_type": asset.asset_type,
-            "asset_identifier": asset.asset_identifier,
-            "scope_reference": asset.reference or "",
-            "scope_max_severity": asset.max_severity or "",
-            "scope_confidentiality_requirement": asset.confidentiality_requirement or "",
-            "scope_integrity_requirement": asset.integrity_requirement or "",
-            "scope_availability_requirement": asset.availability_requirement or "",
         }
         finding_id = store.create_finding(
             {
@@ -251,6 +325,7 @@ def _research_program(
                 "id": finding_id,
                 "program": handle,
                 "target": target,
+                "asset_type": asset.asset_type,
                 "title": draft.get("title", ""),
                 "severity": draft.get("severity"),
                 "confidence": confidence,
