@@ -11,7 +11,7 @@ from .config import Settings
 
 try:
     from vercel.blob import BlobClient
-except ImportError:  # Local environments can continue using SQLite.
+except ImportError:
     BlobClient = None  # type: ignore[assignment]
 
 
@@ -20,26 +20,36 @@ def utc_now() -> str:
 
 
 class Store:
-    """Durable on Vercel Blob; local SQLite fallback for development."""
+    """Durable Vercel Blob when available; safe SQLite fallback if Blob is unavailable."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.blob = None
         if BlobClient is not None and settings.blob_token:
-            self.blob = BlobClient(token=settings.blob_token)
+            try:
+                self.blob = BlobClient(token=settings.blob_token)
+            except Exception:
+                self.blob = None
 
+        # Always keep the local schema available as an emergency fallback.
         self.path = Path(settings.database_path)
-        if self.blob is None:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self._migrate()
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._migrate()
 
     @property
     def durable(self) -> bool:
         return self.blob is not None
 
-    def close(self) -> None:
+    def _disable_blob(self) -> None:
         if self.blob is not None:
-            self.blob.close()
+            try:
+                self.blob.close()
+            except Exception:
+                pass
+        self.blob = None
+
+    def close(self) -> None:
+        self._disable_blob()
 
     # ---------- Blob backend ----------
 
@@ -47,7 +57,8 @@ class Store:
         return f"h1-agent/{category}/{key}.json"
 
     def _blob_put(self, category: str, key: str, value: dict[str, Any]) -> None:
-        assert self.blob is not None
+        if self.blob is None:
+            raise RuntimeError("Blob storage unavailable")
         self.blob.put(
             self._blob_path(category, key),
             json.dumps(value, ensure_ascii=False).encode("utf-8"),
@@ -58,7 +69,8 @@ class Store:
         )
 
     def _blob_get(self, category: str, key: str) -> dict[str, Any]:
-        assert self.blob is not None
+        if self.blob is None:
+            raise RuntimeError("Blob storage unavailable")
         result = self.blob.get(
             self._blob_path(category, key),
             access="private",
@@ -67,7 +79,8 @@ class Store:
         return json.loads(bytes(result).decode("utf-8"))
 
     def _blob_list(self, category: str) -> list[dict[str, Any]]:
-        assert self.blob is not None
+        if self.blob is None:
+            raise RuntimeError("Blob storage unavailable")
         prefix = f"h1-agent/{category}/"
         rows: list[dict[str, Any]] = []
         for item in self.blob.iter_objects(
@@ -133,6 +146,21 @@ class Store:
                 """
             )
 
+    def _save_finding_sqlite(self, record: dict[str, Any]) -> int:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT INTO findings(program_handle,target,title,severity,state,summary,impact,
+                reproduction_json,evidence_json,structured_scope_id,weakness_id,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    record["program_handle"], record["target"], record["title"],
+                    record["severity"], record["state"], record["summary"], record["impact"],
+                    json.dumps(record["reproduction"]), json.dumps(record["evidence"]),
+                    record["structured_scope_id"], record["weakness_id"], record["created_at"],
+                ),
+            )
+            return int(cur.lastrowid)
+
     # ---------- Public methods ----------
 
     def save_program(self, payload: dict[str, Any]) -> None:
@@ -140,6 +168,7 @@ class Store:
         handle = attrs.get("handle")
         if not handle:
             return
+
         record = {
             "handle": handle,
             "name": attrs.get("name", handle),
@@ -147,8 +176,11 @@ class Store:
             "fetched_at": utc_now(),
         }
         if self.blob is not None:
-            self._blob_put("programs", str(handle), record)
-            return
+            try:
+                self._blob_put("programs", str(handle), record)
+                return
+            except Exception:
+                self._disable_blob()
 
         with self._connect() as conn:
             conn.execute(
@@ -158,12 +190,15 @@ class Store:
 
     def save_scopes(self, handle: str, payload: dict[str, Any]) -> None:
         if self.blob is not None:
-            self._blob_put(
-                "scopes",
-                handle,
-                {"program_handle": handle, "raw_json": payload, "fetched_at": utc_now()},
-            )
-            return
+            try:
+                self._blob_put(
+                    "scopes",
+                    handle,
+                    {"program_handle": handle, "raw_json": payload, "fetched_at": utc_now()},
+                )
+                return
+            except Exception:
+                self._disable_blob()
 
         with self._connect() as conn:
             conn.execute("DELETE FROM scopes WHERE program_handle=?", (handle,))
@@ -174,15 +209,11 @@ class Store:
                     eligible_for_bounty,eligible_for_submission,instruction,raw_json,fetched_at)
                     VALUES(?,?,?,?,?,?,?,?,?)""",
                     (
-                        handle,
-                        item.get("id"),
-                        attrs.get("asset_type", ""),
+                        handle, item.get("id"), attrs.get("asset_type", ""),
                         attrs.get("asset_identifier", ""),
                         int(bool(attrs.get("eligible_for_bounty", False))),
                         int(bool(attrs.get("eligible_for_submission", True))),
-                        str(attrs.get("instruction") or ""),
-                        json.dumps(item),
-                        utc_now(),
+                        str(attrs.get("instruction") or ""), json.dumps(item), utc_now(),
                     ),
                 )
 
@@ -208,34 +239,20 @@ class Store:
             "h1_report_id": None,
         }
         if self.blob is not None:
-            self._blob_put("findings", str(finding_id), record)
-            return finding_id
+            try:
+                self._blob_put("findings", str(finding_id), record)
+                return finding_id
+            except Exception:
+                self._disable_blob()
 
-        with self._connect() as conn:
-            cur = conn.execute(
-                """INSERT INTO findings(program_handle,target,title,severity,state,summary,impact,
-                reproduction_json,evidence_json,structured_scope_id,weakness_id,created_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    record["program_handle"],
-                    record["target"],
-                    record["title"],
-                    record["severity"],
-                    record["state"],
-                    record["summary"],
-                    record["impact"],
-                    json.dumps(record["reproduction"]),
-                    json.dumps(record["evidence"]),
-                    record["structured_scope_id"],
-                    record["weakness_id"],
-                    record["created_at"],
-                ),
-            )
-            return int(cur.lastrowid)
+        return self._save_finding_sqlite(record)
 
     def get_finding(self, finding_id: int) -> dict[str, Any]:
         if self.blob is not None:
-            return self._blob_get("findings", str(finding_id))
+            try:
+                return self._blob_get("findings", str(finding_id))
+            except Exception:
+                self._disable_blob()
 
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM findings WHERE id=?", (finding_id,)).fetchone()
@@ -251,12 +268,20 @@ class Store:
         data["state"] = state
         if state == "approved":
             data["approved_at"] = utc_now()
+
         if self.blob is not None:
-            self._blob_put("findings", str(finding_id), data)
-            return
+            try:
+                self._blob_put("findings", str(finding_id), data)
+                return
+            except Exception:
+                self._disable_blob()
+
         with self._connect() as conn:
             if state == "approved":
-                conn.execute("UPDATE findings SET state=?, approved_at=? WHERE id=?", (state, data["approved_at"], finding_id))
+                conn.execute(
+                    "UPDATE findings SET state=?, approved_at=? WHERE id=?",
+                    (state, data["approved_at"], finding_id),
+                )
             else:
                 conn.execute("UPDATE findings SET state=? WHERE id=?", (state, finding_id))
 
@@ -266,9 +291,14 @@ class Store:
         data["report_json"] = payload
         data["submitted_at"] = utc_now()
         data["h1_report_id"] = str(payload.get("data", {}).get("id") or "")
+
         if self.blob is not None:
-            self._blob_put("findings", str(finding_id), data)
-            return
+            try:
+                self._blob_put("findings", str(finding_id), data)
+                return
+            except Exception:
+                self._disable_blob()
+
         with self._connect() as conn:
             conn.execute(
                 "UPDATE findings SET state='submitted', report_json=?, submitted_at=?, h1_report_id=? WHERE id=?",
@@ -277,11 +307,15 @@ class Store:
 
     def list_findings(self) -> list[dict[str, Any]]:
         if self.blob is not None:
-            rows = self._blob_list("findings")
-            return sorted(rows, key=lambda x: int(x.get("id", 0)), reverse=True)
+            try:
+                rows = self._blob_list("findings")
+                return sorted(rows, key=lambda x: int(x.get("id", 0)), reverse=True)
+            except Exception:
+                self._disable_blob()
 
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id,program_handle,target,title,severity,state,h1_report_id,created_at FROM findings ORDER BY id DESC"
+                "SELECT id,program_handle,target,title,severity,state,h1_report_id,created_at "
+                "FROM findings ORDER BY id DESC"
             ).fetchall()
         return [dict(r) for r in rows]
