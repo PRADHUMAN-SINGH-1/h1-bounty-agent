@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-app = FastAPI(title="H1 Bounty Agent", version="0.6.0")
+app = FastAPI(title="H1 Bounty Agent", version="0.7.0")
 _STATE = Path("/tmp/h1-findings.json")
 _SESSION_COOKIE = "h1_session"
 
@@ -144,6 +144,19 @@ def logout() -> JSONResponse:
     response = JSONResponse({"status": "logged_out"})
     response.delete_cookie(_SESSION_COOKIE, path="/")
     return response
+
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> FileResponse:
+    path = Path(__file__).resolve().parent.parent / "public" / "index.html"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Dashboard not found.")
+    return FileResponse(path, media_type="text/html")
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz() -> dict[str, str]:
+    return {"status": "ok"}
 
 
 @app.get("/api")

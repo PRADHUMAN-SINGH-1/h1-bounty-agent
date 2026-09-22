@@ -1,0 +1,140 @@
+services:
+  - type: web
+    name: h1-bounty-agent
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install .
+    startCommand: uvicorn api.index:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: h1-bounty-agent-db
+          property: connectionString
+
+      - key: HACKERONE_USERNAME
+        sync: false
+      - key: HACKERONE_API_TOKEN
+        sync: false
+      - key: HACKERONE_BASE_URL
+        value: https://api.hackerone.com
+
+      - key: DASHBOARD_USER
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: DASHBOARD_SECRET
+        generateValue: true
+
+      - key: CRON_SECRET
+        generateValue: true
+
+      - key: DRY_RUN
+        value: "true"
+      - key: ALLOW_ACTIVE_TESTS
+        value: "false"
+      - key: ALLOW_AUTHZ_TESTS
+        value: "false"
+      - key: ALLOW_STATE_CHANGING_TESTS
+        value: "false"
+      - key: H1_ENABLE_SUBMISSION
+        value: "false"
+      - key: REQUESTS_PER_SECOND
+        value: "1"
+      - key: SESSION_MAP_MAX_PAGES
+        value: "40"
+      - key: SESSION_MAP_MAX_DEPTH
+        value: "2"
+      - key: MUTATION_MAX_REQUESTS
+        value: "3"
+      - key: BROWSER_TRACE_MAX_REQUESTS
+        value: "500"
+
+      - key: AUTONOMOUS_RESEARCH
+        value: "false"
+      - key: AUTONOMOUS_PASSIVE_RESEARCH
+        value: "false"
+      - key: AUTONOMOUS_MAX_PROGRAMS
+        value: "3"
+      - key: AUTONOMOUS_MAX_TARGETS_PER_PROGRAM
+        value: "2"
+      - key: RESEARCH_PROGRAM_ALLOWLIST
+        value: ""
+
+      - key: LLM_PROVIDER
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+
+  - type: cron
+    name: h1-bounty-agent-cron
+    runtime: python
+    plan: free
+    region: singapore
+    schedule: "0 3 * * *"
+    buildCommand: pip install .
+    startCommand: python -m h1_agent.render_cron
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: h1-bounty-agent-db
+          property: connectionString
+
+      - key: HACKERONE_USERNAME
+        sync: false
+      - key: HACKERONE_API_TOKEN
+        sync: false
+      - key: HACKERONE_BASE_URL
+        value: https://api.hackerone.com
+
+      - key: CRON_SECRET
+        fromService:
+          type: web
+          name: h1-bounty-agent
+          envVarKey: CRON_SECRET
+
+      - key: DRY_RUN
+        value: "true"
+      - key: ALLOW_ACTIVE_TESTS
+        value: "false"
+      - key: ALLOW_AUTHZ_TESTS
+        value: "false"
+      - key: ALLOW_STATE_CHANGING_TESTS
+        value: "false"
+      - key: H1_ENABLE_SUBMISSION
+        value: "false"
+      - key: REQUESTS_PER_SECOND
+        value: "1"
+      - key: AUTONOMOUS_RESEARCH
+        value: "false"
+      - key: AUTONOMOUS_PASSIVE_RESEARCH
+        value: "false"
+      - key: AUTONOMOUS_MAX_PROGRAMS
+        value: "3"
+      - key: AUTONOMOUS_MAX_TARGETS_PER_PROGRAM
+        value: "2"
+      - key: RESEARCH_PROGRAM_ALLOWLIST
+        value: ""
+
+      - key: LLM_PROVIDER
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+
+databases:
+  - name: h1-bounty-agent-db
+    plan: free
+    region: singapore
