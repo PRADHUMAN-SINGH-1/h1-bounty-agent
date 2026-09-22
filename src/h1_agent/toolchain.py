@@ -39,8 +39,7 @@ def _run(name: str, args: list[str], *, stdin: str = "", timeout: int = 900) -> 
         )
     except subprocess.TimeoutExpired:
         return ToolRun(name, "timeout", f"{name} timed out after {timeout}s.", [])
-    output = (proc.stdout or "") + ("
-" + proc.stderr if proc.stderr else "")
+    output = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     status = "ok" if proc.returncode == 0 else "error"
     return ToolRun(name, status, f"exit={proc.returncode}; lines={len(lines)}", lines)
