@@ -512,10 +512,8 @@ def run_cycle(
                             "name": attrs.get("name") or handle,
                             "state": attrs.get("state") or "",
                             "policy": attrs.get("policy") or attrs.get("description") or "",
-                            "toolchain": [
-                                {"name": run.name, "status": run.status, "detail": run.detail}
-                                for run in locals().get("toolchain_runs", [])
-                            ],
+                            "toolchain_enabled": settings.toolchain_enabled,
+                            "toolchain_max_roots": settings.toolchain_max_roots,
                         },
                     )
                 except HackerOneAPIError as exc:
