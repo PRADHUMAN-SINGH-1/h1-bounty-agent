@@ -311,9 +311,44 @@ def worker(request: Request, x_action_token: str | None = Header(default=None)) 
     try:
         from h1_agent.config import Settings
         from h1_agent.worker import run_cycle
+        result = run_cycle(Settings())
+        return result
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
-    return run_cycle(Settings())
+        return {
+            "status": "error",
+            "error_type": "endpoint",
+            "error": f"{exc.__class__.__name__}: {exc}",
+        }
+
+
+@app.get("/api/diagnostics")
+def diagnostics(request: Request) -> dict[str, Any]:
+    _require_session(request)
+    from h1_agent.config import Settings
+    settings = Settings()
+    result: dict[str, Any] = {
+        "hackerone_username_configured": bool(settings.hackerone_username),
+        "hackerone_token_configured": bool(settings.hackerone_api_token),
+        "hackerone_base_url": settings.hackerone_base_url,
+        "requests_per_second": settings.requests_per_second,
+        "dry_run": settings.dry_run,
+        "allow_active_tests": settings.allow_active_tests,
+        "autonomous_research": settings.autonomous_research,
+        "submission_enabled": settings.enable_submission,
+    }
+    try:
+        from h1_agent.hackerone import HackerOneClient
+        api = HackerOneClient(settings)
+        try:
+            payload = api.programs(page=1, page_size=1)
+            result["hackerone_status"] = "ok"
+            result["visible_programs"] = len(payload.get("data", []))
+        finally:
+            api.close()
+    except Exception as exc:
+        result["hackerone_status"] = "error"
+        result["hackerone_error"] = f"{exc.__class__.__name__}: {exc}"
+    return result
 
 
 @app.get("/api/cron")
