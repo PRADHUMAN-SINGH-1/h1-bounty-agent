@@ -19,6 +19,9 @@ def test_dashboard_uses_event_binding_for_all_buttons():
     for action in ("data-view-id", "data-approve-id", "data-submit-id", "data-research-handle", "data-assess-handle"):
         assert action in html
     assert html.count('addEventListener("click"') >= 8
+    assert (REPO / "src" / "h1_agent" / "authorization.py").exists()
+    assert (REPO / "src" / "h1_agent" / "attack_surface.py").exists()
+
 
 
 def test_runtime_defaults_are_safe(monkeypatch):

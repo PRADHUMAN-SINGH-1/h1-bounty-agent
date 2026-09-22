@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-app = FastAPI(title="H1 Bounty Agent", version="0.4.0")
+app = FastAPI(title="H1 Bounty Agent", version="0.6.0")
 _STATE = Path("/tmp/h1-findings.json")
 _SESSION_COOKIE = "h1_session"
 
@@ -151,7 +151,7 @@ def health() -> dict[str, Any]:
     return {
         "service": "h1-bounty-agent",
         "status": "online",
-        "version": "0.4.0",
+        "version": "0.6.0",
         "dry_run": os.getenv("DRY_RUN", "true"),
         "active_tests": os.getenv("ALLOW_ACTIVE_TESTS", "false"),
         "autonomous_research": os.getenv("AUTONOMOUS_RESEARCH", "false"),

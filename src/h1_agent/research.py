@@ -6,16 +6,26 @@ from urllib.parse import urljoin
 
 import httpx
 
+from .authorization import AuthorizationDifferentialTester, evidence_from_results
+from .attack_surface import (
+    discover_from_html,
+    discover_from_javascript,
+    discover_from_openapi,
+    parse_openapi,
+    surface_evidence,
+)
 from .config import Settings
 from .models import Evidence, ScopeAsset
-from .scope import require_in_scope
+from .scope import require_in_scope, target_is_in_scope
 from .vulnerability_checks import (
     api_spec_probe,
     cookie_probe,
     cors_probe,
     discover_page,
+    error_injection_probe,
     interesting_query_links,
     mixed_content_probe,
+    sensitive_response_probe,
     open_redirect_probe,
     reflection_probe,
     sourcemap_probe,
@@ -38,7 +48,7 @@ class LowImpactResearch:
         self.scopes = scopes
         self.last_request = 0.0
         self.client = httpx.Client(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=12,
             headers={"User-Agent": settings.user_agent},
         )
@@ -154,7 +164,44 @@ class LowImpactResearch:
         checks: list[CheckResult] = []
         html = home_response.text[:2_000_000]
         links, scripts, _forms = discover_page(html, base)
-        query_links = interesting_query_links(links, base)
+        query_links = [
+            url for url in interesting_query_links(links, base)
+            if target_is_in_scope(url, self.scopes)[0]
+        ]
+
+        surface = [
+            endpoint
+            for endpoint in discover_from_html(html, base)
+            if target_is_in_scope(endpoint.url, self.scopes)[0]
+        ]
+        script_texts: list[tuple[str, str]] = []
+        in_scope_scripts = [
+            url for url in scripts
+            if target_is_in_scope(url, self.scopes)[0]
+        ]
+        for script_url in in_scope_scripts[:10]:
+            try:
+                response = self._get(script_url, follow_redirects=False)
+                content_type = response.headers.get("content-type", "")
+                if response.status_code == 200 and ("javascript" in content_type or "text" in content_type or script_url.endswith(".js")):
+                    script_texts.append((script_url, response.text))
+                    surface.extend(discover_from_javascript(response.text, script_url, base))
+            except httpx.HTTPError:
+                continue
+
+        unique_surface = []
+        seen_surface = set()
+        for endpoint in surface:
+            if endpoint.url in seen_surface:
+                continue
+            seen_surface.add(endpoint.url)
+            unique_surface.append(endpoint)
+        checks.append(CheckResult(
+            "attack_surface_inventory",
+            "found" if unique_surface else "empty",
+            f"{len(unique_surface)} same-origin endpoints discovered",
+            surface_evidence(unique_surface),
+        ))
 
         status, evidence = cors_probe(self.client, base, self._get)
         checks.append(CheckResult("cors_probe", status, status.replace("_", " "), evidence))
@@ -169,11 +216,103 @@ class LowImpactResearch:
                 if status != "skipped":
                     checks.append(CheckResult("open_redirect_probe", status, f"Redirect parameter check for {url}", evidence))
 
-        status, evidence = sourcemap_probe(self.client, scripts, base, self._get)
+                status, evidence = error_injection_probe(url, self._get)
+                if status != "skipped":
+                    checks.append(CheckResult("injection_error_probe", status, f"Error-based injection check for {url}", evidence))
+
+        status, evidence = sourcemap_probe(self.client, in_scope_scripts, base, self._get)
         checks.append(CheckResult("sourcemap_probe", status, status.replace("_", " "), evidence))
 
         status, evidence = api_spec_probe(base, self._get)
         checks.append(CheckResult("api_spec_probe", status, status.replace("_", " "), evidence))
+
+        openapi_endpoints = []
+        for path in ("openapi.json", "swagger.json", "api-docs", "v3/api-docs"):
+            spec_url = urljoin(base, path)
+            if not target_is_in_scope(spec_url, self.scopes)[0]:
+                continue
+            try:
+                response = self._get(spec_url, follow_redirects=False)
+                if response.status_code == 200:
+                    document = parse_openapi(response.text)
+                    if document:
+                        openapi_endpoints.extend(
+                            endpoint
+                            for endpoint in discover_from_openapi(document, base)
+                            if target_is_in_scope(endpoint.url, self.scopes)[0]
+                        )
+            except httpx.HTTPError:
+                continue
+
+        api_candidates = [
+            endpoint.url
+            for endpoint in unique_surface
+            if target_is_in_scope(endpoint.url, self.scopes)[0]
+            and (
+                "/api/" in endpoint.url.lower()
+                or "/graphql" in endpoint.url.lower()
+                or "/rest/" in endpoint.url.lower()
+                or "/v1/" in endpoint.url.lower()
+                or "/v2/" in endpoint.url.lower()
+            )
+        ]
+        for api_url in api_candidates[:8]:
+            status, evidence = sensitive_response_probe(api_url, self._get)
+            checks.append(CheckResult(
+                "sensitive_response_probe",
+                status,
+                f"Read-only API response inspection for {api_url}",
+                evidence,
+            ))
+
+        if openapi_endpoints:
+            seen_openapi = set()
+            deduped_openapi = []
+            for endpoint in openapi_endpoints:
+                if endpoint.url in seen_openapi:
+                    continue
+                seen_openapi.add(endpoint.url)
+                deduped_openapi.append(endpoint)
+            checks.append(CheckResult(
+                "openapi_surface",
+                "found",
+                f"{len(deduped_openapi)} read-only API operations discovered",
+                surface_evidence(deduped_openapi),
+            ))
+
+        if self.settings.allow_authz_tests and self.settings.authz_header_a and self.settings.authz_header_b:
+            authz_urls = [
+                endpoint.url
+                for endpoint in unique_surface
+                if target_is_in_scope(endpoint.url, self.scopes)[0]
+                and ("/api/" in endpoint.url.lower() or "graphql" in endpoint.url.lower())
+            ]
+            authz_urls.extend(
+                endpoint.url
+                for endpoint in openapi_endpoints[:20]
+                if target_is_in_scope(endpoint.url, self.scopes)[0]
+            )
+            try:
+                tester = AuthorizationDifferentialTester(
+                    self.client,
+                    self.settings.authz_header_a,
+                    self.settings.authz_header_b,
+                    self.settings.authz_max_endpoints,
+                )
+                differential = tester.compare(authz_urls)
+                checks.append(CheckResult(
+                    "authorization_differential",
+                    "review" if any(item.suspicious for item in differential) else "observed",
+                    "Two-account read-only authorization differential",
+                    evidence_from_results(differential),
+                ))
+            except ValueError as exc:
+                checks.append(CheckResult(
+                    "authorization_differential",
+                    "error",
+                    str(exc),
+                    [Evidence("authorization_config_error", str(exc), base)],
+                ))
 
         status, evidence = mixed_content_probe(base, html)
         checks.append(CheckResult("mixed_content_probe", status, status.replace("_", " "), evidence))
@@ -184,5 +323,12 @@ class LowImpactResearch:
 def flatten(results: list[CheckResult]) -> list[Evidence]:
     evidence: list[Evidence] = []
     for result in results:
+        evidence.append(
+            Evidence(
+                "check_result",
+                f"{result.name}: status={result.status}; detail={result.detail}",
+                "h1-bounty-agent",
+            )
+        )
         evidence.extend(result.evidence)
     return evidence

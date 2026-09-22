@@ -147,6 +147,9 @@ Rules:
 - Every technical claim must be traceable to the evidence.
 - Do not turn a missing security header or informational metadata into a bounty candidate by itself.
 - Use status=candidate only when the supplied evidence itself demonstrates a plausible security-relevant condition.
+- A status/header difference, exposed documentation, source map, cookie flag, or reflected marker alone is not proof of a critical vulnerability.
+- For authorization_differential evidence, treat an unexpected 2xx response for the lower-privileged/other account as a strong lead only when the evidence and endpoint context support an access-control boundary; require human reproduction before submission.
+- Critical severity requires evidence of material confidentiality, integrity, or availability impact; never infer critical severity from a label or scanner signal alone.
 - Otherwise use no_finding or needs_review.
 - Keep reproduction concrete and minimal; do not invent steps that were not performed.
 - affected_component, preconditions, observed_behavior, expected_behavior, attack_scenario, and remediation
