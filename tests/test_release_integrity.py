@@ -11,11 +11,14 @@ def test_python_sources_compile():
     compile((REPO / "api" / "index.py").read_text(encoding="utf-8"), "api/index.py", "exec")
 
 
-def test_dashboard_uses_event_binding_not_inline_json_onclick():
+def test_dashboard_uses_event_binding_for_all_buttons():
     html = (REPO / "public" / "index.html").read_text(encoding="utf-8")
-    assert 'onclick="researchProgram(' not in html
-    assert 'data-research-handle="${handle}"' in html
-    assert 'addEventListener("click"' in html
+    assert "onclick=" not in html
+    for action in ("connectBtn", "run", "refreshBtn", "logoutBtn", "scanBtn"):
+        assert f'id="{action}"' in html
+    for action in ("data-view-id", "data-approve-id", "data-submit-id", "data-research-handle"):
+        assert action in html
+    assert html.count('addEventListener("click"') >= 8
 
 
 def test_runtime_defaults_are_safe(monkeypatch):
