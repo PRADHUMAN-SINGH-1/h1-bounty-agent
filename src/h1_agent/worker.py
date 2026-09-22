@@ -133,6 +133,13 @@ def _research_program(
             "cvss_score": draft.get("cvss_score"),
             "cvss_vector": draft.get("cvss_vector") or "",
             "missing_validation": draft.get("missing_validation") or [],
+            "asset_type": asset.asset_type,
+            "asset_identifier": asset.asset_identifier,
+            "scope_reference": asset.reference or "",
+            "scope_max_severity": asset.max_severity or "",
+            "scope_confidentiality_requirement": asset.confidentiality_requirement or "",
+            "scope_integrity_requirement": asset.integrity_requirement or "",
+            "scope_availability_requirement": asset.availability_requirement or "",
         }
         finding_id = store.create_finding(
             {
