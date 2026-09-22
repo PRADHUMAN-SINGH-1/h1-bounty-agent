@@ -82,9 +82,9 @@ class Settings:
 
     blob_token: str = _raw("BLOB_READ_WRITE_TOKEN")
 
-    llm_provider: str = _raw("LLM_PROVIDER", "vercel_gateway" if os.getenv("VERCEL") else "ollama").lower()
-    llm_base_url: str = _raw("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1" if os.getenv("VERCEL") else "http://127.0.0.1:11434")
-    llm_model: str = _raw("LLM_MODEL", "inclusionai/ling-3.0-flash-vl-free" if os.getenv("VERCEL") else "llama3.1:8b")
+    llm_provider: str = _llm_provider()
+    llm_base_url: str = _llm_base_url(llm_provider)
+    llm_model: str = _llm_model(llm_provider)
     hf_token: str = _raw("HF_TOKEN")
     llm_api_key: str = _raw("LLM_API_KEY")
 
