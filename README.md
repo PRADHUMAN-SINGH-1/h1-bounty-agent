@@ -41,6 +41,7 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Explicit submission gate
 - Vercel Python/ASGI entrypoints
 - Vercel daily discovery/research worker with explicit program allowlist
+- Dashboard program selection with human authorization for low-impact passive research
 - Authenticated web review dashboard with one-click Validate & Submit
 - GitHub Actions CI
 
@@ -66,7 +67,7 @@ After Vercel rebuilds from the latest `main` commit:
 - `/api/worker` runs one on-demand cycle after dashboard authentication.
 - `/` opens the review dashboard.
 
-The cron worker now supports two modes. Discovery runs automatically. Authorized low-impact research is opt-in through `AUTONOMOUS_RESEARCH=true`, `ALLOW_ACTIVE_TESTS=true`, and an explicit `RESEARCH_PROGRAM_ALLOWLIST`; it never submits reports automatically.
+The cron worker supports discovery and an optional passive-research mode. Discovery runs automatically. Passive research can be enabled with `AUTONOMOUS_PASSIVE_RESEARCH=true` plus an explicit `RESEARCH_PROGRAM_ALLOWLIST`; it performs only the low-impact checks implemented in the research engine. Active testing remains separately gated by `ALLOW_ACTIVE_TESTS=true` and `AUTONOMOUS_RESEARCH=true`. Neither mode submits reports automatically.
 
 Current Vercel scheduling depends on the plan: Hobby currently provides daily Cron execution with per-hour precision, while Pro/Enterprise support more frequent scheduling.
 
@@ -106,6 +107,7 @@ LLM_MODEL=llama3.1:8b
 
 # Autonomous research gates
 AUTONOMOUS_RESEARCH=false
+AUTONOMOUS_PASSIVE_RESEARCH=false
 AUTONOMOUS_MAX_PROGRAMS=3
 AUTONOMOUS_MAX_TARGETS_PER_PROGRAM=2
 RESEARCH_PROGRAM_ALLOWLIST=<reviewed handles, comma separated>
