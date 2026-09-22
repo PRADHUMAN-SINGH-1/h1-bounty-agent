@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -188,20 +188,70 @@ class LowImpactResearch:
     def _active_assessment(self, base: str, home_response: httpx.Response) -> list[CheckResult]:
         checks: list[CheckResult] = []
         html = home_response.text[:2_000_000]
-        links, scripts, _forms = discover_page(html, base)
+        links, scripts, forms = discover_page(html, base)
+
+        # Deep mode performs a bounded same-origin GET crawl. This is intentionally
+        # read-only: it follows links and analyzes responses, but never submits forms
+        # or changes application state.
+        pages_seen = {base.rstrip("/")}
+        page_queue = [
+            link
+            for link in links
+            if same_origin(link, base)
+            and target_is_in_scope(link, self.scopes)[0]
+        ][: self.settings.deep_max_page_links]
+        page_documents: list[tuple[str, str]] = [(base, html)]
+        all_links = list(links)
+        all_scripts = list(scripts)
+        all_forms = list(forms)
+
+        while page_queue and len(page_documents) < self.settings.deep_max_pages:
+            page_url = page_queue.pop(0)
+            normalized = page_url.rstrip("/")
+            if normalized in pages_seen:
+                continue
+            pages_seen.add(normalized)
+            try:
+                response = self._get(page_url, follow_redirects=False)
+            except httpx.HTTPError:
+                continue
+            content_type = response.headers.get("content-type", "").lower()
+            if response.status_code >= 400 or "html" not in content_type and "text" not in content_type:
+                continue
+            page_html = response.text[:2_000_000]
+            page_documents.append((page_url, page_html))
+            page_links, page_scripts, page_forms = discover_page(page_html, page_url)
+            for item in page_links:
+                if item not in all_links:
+                    all_links.append(item)
+                if (
+                    same_origin(item, base)
+                    and target_is_in_scope(item, self.scopes)[0]
+                    and item.rstrip("/") not in pages_seen
+                    and len(page_queue) < self.settings.deep_max_page_links
+                ):
+                    page_queue.append(item)
+            for item in page_scripts:
+                if item not in all_scripts:
+                    all_scripts.append(item)
+            all_forms.extend(page_forms)
+
         query_links = [
-            url for url in interesting_query_links(links, base)
+            url for url in interesting_query_links(all_links, base)
             if target_is_in_scope(url, self.scopes)[0]
         ]
 
-        surface = [
-            endpoint
-            for endpoint in discover_from_html(html, base)
-            if target_is_in_scope(endpoint.url, self.scopes)[0]
-        ]
+        surface = []
+        for page_url, page_html in page_documents:
+            surface.extend(
+                endpoint
+                for endpoint in discover_from_html(page_html, page_url)
+                if target_is_in_scope(endpoint.url, self.scopes)[0]
+            )
+
         script_texts: list[tuple[str, str]] = []
         in_scope_scripts = [
-            url for url in scripts
+            url for url in all_scripts
             if target_is_in_scope(url, self.scopes)[0]
         ]
         for script_url in in_scope_scripts[: self.settings.deep_max_scripts]:
@@ -221,11 +271,16 @@ class LowImpactResearch:
                 continue
             seen_surface.add(endpoint.url)
             unique_surface.append(endpoint)
+        page_evidence = [
+            Evidence("deep_crawl_pages", str(len(page_documents)), base),
+            Evidence("deep_crawl_links", str(len(all_links)), base),
+            Evidence("deep_crawl_forms", str(len(all_forms)), base),
+        ]
         checks.append(CheckResult(
             "attack_surface_inventory",
             "found" if unique_surface else "empty",
-            f"{len(unique_surface)} same-origin endpoints discovered",
-            surface_evidence(unique_surface),
+            f"{len(unique_surface)} same-origin endpoints discovered across {len(page_documents)} pages",
+            page_evidence + surface_evidence(unique_surface),
         ))
 
         request_records = [
