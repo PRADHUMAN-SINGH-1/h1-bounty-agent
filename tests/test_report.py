@@ -48,3 +48,7 @@ def test_report_contains_triage_critical_sections():
         "Researcher Submission Checklist",
     ):
         assert heading in text
+
+
+def test_report_mentions_human_validation():
+    assert "Human validation is required before submission." in open("src/h1_agent/reporting.py", encoding="utf-8").read()
