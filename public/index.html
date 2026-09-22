@@ -215,8 +215,15 @@ function renderResult(d){
   lines.push("Mode: "+(d.mode||"unknown"));
   lines.push("Targets checked: "+(d.researched_targets||0));
   lines.push("Report candidates created: "+(d.created_findings||0));
+  const results=d.program_results||[];
+  if(results.length){
+    results.forEach(function(r){
+      lines.push("Program "+(r.program||"")+" → checks="+(r.checks_run||0)+", evidence="+(r.evidence_collected||0)+", candidates="+(r.created_findings||0));
+      if(r.research_trace&&r.research_trace.checks) lines.push("Checks: "+r.research_trace.checks.join(", "));
+    });
+  }
   if(d.error) lines.push("Error: "+d.error);
-  if(d.skipped&&d.skipped.length) lines.push("Notes:\n- "+d.skipped.join("\n- "));
+  if(d.skipped&&d.skipped.length) lines.push("Notes:\n- "+d.skipped.map(function(x){return typeof x==="string"?x:(x.program?x.program+": "+(x.reason||JSON.stringify(x)):JSON.stringify(x));}).join("\n- "));
   const status=document.getElementById("researchStatus");
   status.textContent=lines.join("\n");
   status.className=(d.status==="ok"?"ok":(d.status==="blocked"?"muted":"err"));

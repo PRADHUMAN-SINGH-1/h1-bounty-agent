@@ -65,3 +65,13 @@ def test_full_research_pipeline_is_distinct_from_active_gate():
     assert "deep: bool = False" in research
     assert "if (deep or active) and home_response is not None" in research
     assert 'mode = str(body.get("mode", "") or "").strip().lower()' in api
+
+
+def test_research_run_exposes_trace_and_no_finding_reason():
+    worker = (REPO / "src" / "h1_agent" / "worker.py").read_text(encoding="utf-8")
+    dashboard = (REPO / "public" / "index.html").read_text(encoding="utf-8")
+    assert '"evidence_collected"' in worker
+    assert '"checks_run"' in worker
+    assert '"research_trace"' in worker
+    assert "LLM evaluation returned status=" in worker
+    assert "research_trace.checks" in dashboard
