@@ -214,7 +214,7 @@ class LowImpactResearch:
                 if status != "skipped":
                     checks.append(CheckResult("open_redirect_probe", status, f"Redirect parameter check for {url}", evidence))
 
-        status, evidence = sourcemap_probe(self.client, scripts, base, self._get)
+        status, evidence = sourcemap_probe(self.client, in_scope_scripts, base, self._get)
         checks.append(CheckResult("sourcemap_probe", status, status.replace("_", " "), evidence))
 
         status, evidence = api_spec_probe(base, self._get)
@@ -223,12 +223,18 @@ class LowImpactResearch:
         openapi_endpoints = []
         for path in ("openapi.json", "swagger.json", "api-docs", "v3/api-docs"):
             spec_url = urljoin(base, path)
+            if not target_is_in_scope(spec_url, self.scopes)[0]:
+                continue
             try:
                 response = self._get(spec_url, follow_redirects=False)
                 if response.status_code == 200:
                     document = parse_openapi(response.text)
                     if document:
-                        openapi_endpoints.extend(discover_from_openapi(document, base))
+                        openapi_endpoints.extend(
+                            endpoint
+                            for endpoint in discover_from_openapi(document, base)
+                            if target_is_in_scope(endpoint.url, self.scopes)[0]
+                        )
             except httpx.HTTPError:
                 continue
 
