@@ -88,8 +88,6 @@ services:
         value: "true"
       - key: TOOLCHAIN_MAX_ROOTS
         value: "10"
-      - key: AUTO_SUBMIT
-        value: "false"
       - key: RESEARCH_PROGRAM_ALLOWLIST
         value: ""
 
