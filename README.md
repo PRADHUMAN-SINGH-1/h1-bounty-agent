@@ -26,7 +26,7 @@ Optional HackerOne submission
 
 The project is intentionally **fail-closed**. A target must match an eligible structured scope before the research engine can send target traffic.
 
-## Current v0.4
+## Current v0.5
 
 - HackerOne Hacker API client
 - Program discovery and structured-scope retrieval
@@ -36,6 +36,9 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Local Ollama LLM integration
 - Hosted Hugging Face OpenAI-compatible LLM adapter
 - Low-impact HTTP evidence collection
+- Scope-gated deep vulnerability assessment mode
+- Same-origin link/query discovery without form submission
+- Reflection canary checks, CORS differential checks, redirect-parameter checks, cookie flag checks, source-map checks, API-spec discovery, and mixed-content observations
 - Evidence-grounded finding drafting
 - Human review and approval gate
 - Explicit submission gate
@@ -67,7 +70,7 @@ After Vercel rebuilds from the latest `main` commit:
 - `/api/worker` runs one on-demand cycle after dashboard authentication.
 - `/` opens the review dashboard.
 
-The cron worker supports discovery and an optional passive-research mode. Discovery runs automatically. Passive research can be enabled with `AUTONOMOUS_PASSIVE_RESEARCH=true` plus an explicit `RESEARCH_PROGRAM_ALLOWLIST`; it performs only the low-impact checks implemented in the research engine. Active testing remains separately gated by `ALLOW_ACTIVE_TESTS=true` and `AUTONOMOUS_RESEARCH=true`. Neither mode submits reports automatically.
+The cron worker supports discovery and an optional passive-research mode. Discovery runs automatically. Passive research can be enabled with `AUTONOMOUS_PASSIVE_RESEARCH=true` plus an explicit `RESEARCH_PROGRAM_ALLOWLIST`; it performs only the low-impact checks implemented in the research engine. Deep vulnerability assessment is explicitly user-triggered and separately gated by `ALLOW_ACTIVE_TESTS=true`. The assessment engine remains scope-gated and uses non-destructive GET/OPTIONS-style probes; it does not submit forms, brute-force credentials, exploit destructive payloads, or scan outside the selected HackerOne structured scope. Neither mode submits reports automatically.
 
 Current Vercel scheduling depends on the plan: Hobby currently provides daily Cron execution with per-hour precision, while Pro/Enterprise support more frequent scheduling.
 
@@ -207,3 +210,4 @@ This project does **not** guarantee bounty income. A finding must be real, repro
 9. Earnings/report-state synchronization
 10. More authorization-aware research plugins
 11. Deeper evidence correlation and report quality scoring
+12. Authenticated two-account authorization testing where a program explicitly permits it
