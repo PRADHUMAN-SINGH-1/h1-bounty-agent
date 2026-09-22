@@ -37,7 +37,7 @@ pre{white-space:pre-wrap;background:#080f1a;border:1px solid #25354d;border-radi
 <div id="app" class="hidden">
 <div style="display:flex;justify-content:space-between;gap:20px;align-items:flex-start">
 <div><h1>H1 Bounty Agent</h1><p class="muted">Production review queue</p></div>
-<div class="actions"><button id="run">Run research cycle</button><button id="refreshBtn">Refresh</button><button id="logoutBtn">Logout</button></div>
+<div class="actions"><button class="primary" id="run">Hunt automatically</button><button id="refreshBtn">Refresh</button><button id="logoutBtn">Logout</button></div>
 </div>
 
 <div class="grid">
@@ -74,7 +74,7 @@ async function request(url, options){
 }
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 document.getElementById("connectBtn").addEventListener("click", connect);
-document.getElementById("run").addEventListener("click", runWorker);
+document.getElementById("run").addEventListener("click", huntAutomatically);
 document.getElementById("refreshBtn").addEventListener("click", load);
 document.getElementById("logoutBtn").addEventListener("click", logout);
 document.getElementById("scanBtn").addEventListener("click", scanPrograms);
@@ -155,12 +155,45 @@ async function approve(id){
   }catch(e){alert(e.message)}
 }
 async function scanPrograms(){
-  const b=document.getElementById("run"); const s=document.getElementById("scanBtn"); b.disabled=true; s.disabled=true; b.textContent="Scanning…"; s.textContent="Scanning…";
+  const b=document.getElementById("run"); const s=document.getElementById("scanBtn"); b.disabled=true; s.disabled=true; b.textContent="Finding programs…"; s.textContent="Finding programs…";
   try{
     const d=await request("/api/worker",{method:"POST",body:JSON.stringify({})});
     renderPrograms(d.top_opportunities||[]);
   }catch(e){alert(e.message)}
-  finally{b.disabled=false;s.disabled=false;b.textContent="Run research cycle";s.textContent="Scan Programs"}
+  finally{b.disabled=false;s.disabled=false;b.textContent="Hunt automatically";s.textContent="Scan Programs"}
+}
+
+async function huntAutomatically(){
+  const status=document.getElementById("researchStatus");
+  const b=document.getElementById("run");
+  b.disabled=true;
+  b.textContent="Finding bounty candidates…";
+  status.textContent="Loading current HackerOne programs and queuing the strongest eligible research targets…";
+  try{
+    const discovery=await request("/api/worker",{method:"POST",body:JSON.stringify({})});
+    const programs=(discovery.top_opportunities||[]).slice(0,5);
+    if(!programs.length){
+      status.textContent="No eligible programs were returned by HackerOne.";
+      return;
+    }
+    renderPrograms(programs);
+    const queued=await request("/api/research/jobs",{
+      method:"POST",
+      body:JSON.stringify({
+        programs:programs.map(function(p){return p.handle}),
+        mode:"full"
+      })
+    });
+    status.textContent="Bounty hunt queued: "+queued.job_id+"\nPrograms: "+programs.map(function(p){return p.handle}).join(", ")+"\nThe GitHub research runner will process them in the background.";
+    if(queued.job_id) await pollResearchJob(queued.job_id);
+  }catch(e){
+    status.textContent="Automatic bounty hunt failed: "+e.message;
+    status.className="err";
+    alert(e.message);
+  }finally{
+    b.disabled=false;
+    b.textContent="Hunt automatically";
+  }
 }
 
 function renderPrograms(programs){
