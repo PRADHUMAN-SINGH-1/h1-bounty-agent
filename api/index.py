@@ -385,57 +385,9 @@ def programs(request: Request) -> dict[str, Any]:
         api.close()
 
 
-def _run_research_job(job_id: str, programs: list[str], mode: str) -> None:
-    from h1_agent.config import Settings
-    from h1_agent.store import Store
-    from h1_agent.worker import run_cycle
-
-    settings = Settings()
-    store = Store(settings)
-    try:
-        store.update_research_job(job_id, {"status": "running"})
-
-        def progress(payload: dict[str, Any]) -> None:
-            store.update_research_job(job_id, {
-                "status": "running",
-                "progress": payload,
-            })
-
-        result = run_cycle(
-            settings,
-            requested_programs=set(programs),
-            mode=mode,
-            on_progress=progress,
-        )
-        store.update_research_job(
-            job_id,
-            {
-                "status": "completed" if result.get("status") in {"ok", "blocked"} else "error",
-                "result": result,
-                "progress": {
-                    "program": None,
-                    "target": None,
-                    "planned_targets": result.get("researched_targets", 0),
-                    "completed_targets": result.get("researched_targets", 0),
-                },
-            },
-        )
-    except Exception as exc:
-        store.update_research_job(
-            job_id,
-            {
-                "status": "error",
-                "error": f"{exc.__class__.__name__}: {exc}",
-            },
-        )
-    finally:
-        store.close()
-
-
 @app.post("/api/research/jobs")
 async def start_research_job(
     request: Request,
-    background_tasks: BackgroundTasks,
     x_action_token: str | None = Header(default=None),
 ) -> JSONResponse:
     _require_session(request)
@@ -465,7 +417,6 @@ async def start_research_job(
     finally:
         store.close()
 
-    background_tasks.add_task(_run_research_job, job_id, programs, "full")
     return JSONResponse(
         status_code=202,
         content={
