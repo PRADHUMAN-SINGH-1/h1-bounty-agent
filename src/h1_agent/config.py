@@ -88,7 +88,7 @@ class Settings:
 
     autonomous_research: bool = _bool("AUTONOMOUS_RESEARCH", False)
     autonomous_passive_research: bool = _bool("AUTONOMOUS_PASSIVE_RESEARCH", False)
-    autonomous_max_programs: int = max(_int("AUTONOMOUS_MAX_PROGRAMS", 5), 1)
+    autonomous_max_programs: int = max(_int("AUTONOMOUS_MAX_PROGRAMS", 3), 1)
     autonomous_max_targets_per_program: int = max(
         _int("AUTONOMOUS_MAX_TARGETS_PER_PROGRAM", 2),
         1,
