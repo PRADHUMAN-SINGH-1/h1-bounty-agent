@@ -106,6 +106,7 @@ def _maybe_auto_submit(
     target: str,
     title: str,
     severity: str | None,
+    confidence: float,
     summary: str,
     impact: str,
     reproduction: list,
@@ -122,6 +123,8 @@ def _maybe_auto_submit(
         return {"status": "blocked", "reason": "DRY_RUN is enabled"}
     if severity not in {"high", "critical"}:
         return {"status": "blocked", "reason": "automatic submission requires high/critical severity"}
+    if confidence < 0.90:
+        return {"status": "blocked", "reason": f"confidence {confidence:.2f} is below the 0.90 automatic-submission threshold"}
     if not reproduction or len(evidence_json) < 10:
         return {"status": "blocked", "reason": "insufficient reproduction/evidence"}
     if metadata.get("missing_validation"):
@@ -490,6 +493,7 @@ def _research_program(
                     target,
                     draft.get("title", ""),
                     draft.get("severity"),
+                    confidence,
                     draft.get("summary", ""),
                     draft.get("impact", ""),
                     draft.get("reproduction", []),
