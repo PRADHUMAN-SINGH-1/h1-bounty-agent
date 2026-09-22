@@ -344,6 +344,7 @@ async def worker(request: Request, x_action_token: str | None = Header(default=N
         from h1_agent.worker import run_cycle
 
         requested_programs: set[str] | None = None
+        active = False
         try:
             body = await request.json()
             if isinstance(body, dict) and isinstance(body.get("programs"), list):
@@ -352,10 +353,17 @@ async def worker(request: Request, x_action_token: str | None = Header(default=N
                     for handle in body["programs"]
                     if str(handle).strip()
                 } or None
+            if isinstance(body, dict):
+                active = bool(body.get("active", False))
         except Exception:
             requested_programs = None
+            active = False
 
-        return run_cycle(Settings(), requested_programs=requested_programs)
+        return run_cycle(
+            Settings(),
+            requested_programs=requested_programs,
+            active=active,
+        )
     except Exception as exc:
         return {
             "status": "error",
