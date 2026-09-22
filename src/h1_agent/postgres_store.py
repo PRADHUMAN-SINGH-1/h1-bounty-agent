@@ -258,11 +258,19 @@ class PostgresStore:
             raise KeyError(f"Finding {finding_id} not found")
 
     def list_findings(self) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT * FROM h1_findings ORDER BY id DESC"
-            ).fetchall()
-        return [self._row(row) for row in rows]
+        last_error: Exception | None = None
+        for _ in range(2):
+            try:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        "SELECT * FROM h1_findings ORDER BY id DESC"
+                    ).fetchall()
+                return [self._row(row) for row in rows]
+            except (psycopg.Error, OSError) as exc:
+                last_error = exc
+        if last_error is not None:
+            raise RuntimeError("Persistent findings storage is unavailable.") from last_error
+        return []
 
     def save_memory(self, scope_key: str, items: list[dict[str, Any]]) -> None:
         with self._connect() as conn:
