@@ -161,8 +161,6 @@ Rules:
 PROGRAM_CONTEXT={json.dumps(program_context or {}, indent=2)[:16000]}
 PROGRAM={program_handle}
 TARGET={target}
-PROGRAM_CONTEXT={json.dumps(program_context, indent=2)[:16000]}
-LEADS={json.dumps(leads or [], indent=2)}
 EVIDENCE={json.dumps(evidence, indent=2)}
 """
         return self.json(prompt)
@@ -208,6 +206,8 @@ Rules:
 
 PROGRAM={program_handle}
 TARGET={target}
+PROGRAM_CONTEXT={json.dumps(program_context or {}, indent=2)[:16000]}
+LEADS={json.dumps(leads or [], indent=2)}
 EVIDENCE={json.dumps(evidence, indent=2)}
 """
         return self.json(prompt)
