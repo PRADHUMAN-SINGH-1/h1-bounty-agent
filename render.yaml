@@ -35,6 +35,12 @@ services:
         value: "false"
       - key: ALLOW_AUTHZ_TESTS
         value: "false"
+      - key: AUTHZ_HEADER_A
+        sync: false
+      - key: AUTHZ_HEADER_B
+        sync: false
+      - key: AUTHZ_MAX_ENDPOINTS
+        value: "30"
       - key: ALLOW_STATE_CHANGING_TESTS
         value: "false"
       - key: H1_ENABLE_SUBMISSION
