@@ -30,14 +30,14 @@ pre{white-space:pre-wrap;background:#080f1a;border:1px solid #25354d;border-radi
 <p class="muted">Authorized research → evidence → human validation → HackerOne</p>
 <input id="user" autocomplete="username" placeholder="Dashboard username">
 <input id="pass" autocomplete="current-password" type="password" placeholder="Dashboard password (or DASHBOARD_SECRET)">
-<button class="primary" onclick="connect()">Connect</button>
+<button class="primary" id="connectBtn">Connect</button>
 <p id="loginErr" class="err"></p>
 </div>
 
 <div id="app" class="hidden">
 <div style="display:flex;justify-content:space-between;gap:20px;align-items:flex-start">
 <div><h1>H1 Bounty Agent</h1><p class="muted">Production review queue</p></div>
-<div class="actions"><button id="run" onclick="runWorker()">Run research cycle</button><button onclick="load()">Refresh</button><button onclick="logout()">Logout</button></div>
+<div class="actions"><button id="run">Run research cycle</button><button id="refreshBtn">Refresh</button><button id="logoutBtn">Logout</button></div>
 </div>
 
 <div class="grid">
@@ -49,7 +49,7 @@ pre{white-space:pre-wrap;background:#080f1a;border:1px solid #25354d;border-radi
 <div class="card">
 <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
 <div><h2>HackerOne Programs</h2><p class="muted">Select a program after reviewing its current policy and scope.</p></div>
-<button onclick="scanPrograms()">Scan Programs</button>
+<button id="scanBtn">Scan Programs</button>
 </div>
 <div id="researchStatus" class="muted" style="margin-top:10px;white-space:pre-wrap"></div>
 <div id="programs" class="muted">No scan yet.</div>
@@ -72,6 +72,12 @@ async function request(url, options){
   return data;
 }
 function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+document.getElementById("connectBtn").addEventListener("click", connect);
+document.getElementById("run").addEventListener("click", runWorker);
+document.getElementById("refreshBtn").addEventListener("click", load);
+document.getElementById("logoutBtn").addEventListener("click", logout);
+document.getElementById("scanBtn").addEventListener("click", scanPrograms);
+
 async function connect(){
   const username=document.getElementById("user").value.trim();
   const password=document.getElementById("pass").value;
@@ -98,11 +104,21 @@ async function load(){
     if(!rows.length){document.getElementById("list").innerHTML="<p class='muted'>No report candidates yet.</p>";return;}
     document.getElementById("list").innerHTML=rows.map(x=>{
       let b='<div class="finding card"><div style="display:flex;justify-content:space-between;gap:12px"><div><div class="title">'+esc(x.title||"Untitled")+'</div><div class="meta">'+esc(x.program_handle)+' · '+esc(x.target)+' · '+esc(x.severity||"review")+'</div></div><span class="badge">'+esc(x.state)+'</span></div>';
-      b+='<div class="actions" style="margin-top:12px"><button onclick="view('+x.id+')">View report</button>';
-      if(x.state==="needs_review"||x.state==="draft")b+='<button class="primary" onclick="approve('+x.id+')">✓ Approve</button>';
-      if(x.state==="approved")b+='<button class="danger" onclick="submitFinding('+x.id+')">Submit to HackerOne</button>';
+      b+='<div class="actions" style="margin-top:12px"><button data-view-id="\${x.id}">View report</button>';
+      if(x.state==="needs_review"||x.state==="draft")b+='<button class="primary" data-approve-id="\${x.id}">✓ Approve</button>';
+      if(x.state==="approved")b+='<button class="danger" data-submit-id="\${x.id}">Submit to HackerOne</button>';
       b+='</div><details id="d'+x.id+'"><summary>Evidence / report</summary><pre id="p'+x.id+'">Open to load…</pre></details></div>'; return b;
     }).join("");
+
+    document.querySelectorAll("[data-view-id]").forEach(function(btn){
+      btn.addEventListener("click", function(){ view(Number(btn.getAttribute("data-view-id"))); });
+    });
+    document.querySelectorAll("[data-approve-id]").forEach(function(btn){
+      btn.addEventListener("click", function(){ approve(Number(btn.getAttribute("data-approve-id"))); });
+    });
+    document.querySelectorAll("[data-submit-id]").forEach(function(btn){
+      btn.addEventListener("click", function(){ submitFinding(Number(btn.getAttribute("data-submit-id"))); });
+    });
   }catch(e){
     if(e.message.toLowerCase().includes("connect")){logout();return;}
     document.getElementById("list").innerHTML="<p class='err'>"+esc(e.message)+"</p>";
@@ -123,12 +139,12 @@ async function submitFinding(id){
   try{const d=await request("/api/findings/"+id+"/submit",{method:"POST"});alert("Submitted. Report ID: "+(((d.report||{}).data||{}).id||"unknown"));await load()}catch(e){alert(e.message)}
 }
 async function scanPrograms(){
-  const b=document.getElementById("run"); b.disabled=true; b.textContent="Scanning…";
+  const b=document.getElementById("run"); const s=document.getElementById("scanBtn"); b.disabled=true; s.disabled=true; b.textContent="Scanning…"; s.textContent="Scanning…";
   try{
     const d=await request("/api/worker",{method:"POST",body:JSON.stringify({})});
     renderPrograms(d.top_opportunities||[]);
   }catch(e){alert(e.message)}
-  finally{b.disabled=false;b.textContent="Run research cycle"}
+  finally{b.disabled=false;s.disabled=false;b.textContent="Run research cycle";s.textContent="Scan Programs"}
 }
 
 function renderPrograms(programs){
@@ -198,6 +214,10 @@ async function logout(){
   token=""; connected=false;
   document.getElementById("app").classList.add("hidden");
   document.getElementById("login").classList.remove("hidden");
+}
+// Guard against regressions: all UI actions are wired with addEventListener.
+if (document.querySelector("[onclick]")) {
+  console.warn("Dashboard contains an inline event handler; use addEventListener instead.");
 }
 </script>
 </body>
