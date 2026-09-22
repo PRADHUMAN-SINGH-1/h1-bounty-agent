@@ -164,13 +164,19 @@ def pattern_evidence() -> list[Evidence]:
     ]
 
 
+def _items(value) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    return tuple(value or ())
+
+
 def relevant_patterns(evidence: list[Evidence], limit: int = 12) -> list[Pattern]:
     names = " ".join(item.name + " " + item.value for item in evidence).lower()
     scored = []
     for pattern in PATTERNS:
         score = 0
-        for token in pattern.classes + pattern.prerequisites + pattern.strong_signals:
-            if token.lower() in names:
+        for token in _items(pattern.classes) + _items(pattern.prerequisites) + _items(pattern.strong_signals):
+            if str(token).lower() in names:
                 score += 1
         if score:
             scored.append((score, pattern))
