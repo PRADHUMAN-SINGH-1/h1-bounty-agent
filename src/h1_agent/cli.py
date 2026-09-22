@@ -12,6 +12,7 @@ from .models import Evidence, Finding
 from .mobile import analyze_mobile_package
 from .cloud import analyze_cloud_text
 from .browser_trace import browser_model_json, load_har
+from .browser_automation import AuthorizedBrowserMapper
 from .business_logic import build_workflow_model, model_evidence
 from .hypotheses import generate_hypotheses
 
@@ -59,6 +60,12 @@ def main() -> None:
     browser.add_argument("handle")
     browser.add_argument("path")
 
+    crawl = sub.add_parser("browser-crawl", help="Run an authorized local Playwright read-only crawl")
+    crawl.add_argument("handle")
+    crawl.add_argument("target")
+    crawl.add_argument("--storage-state", default=None)
+    crawl.add_argument("--max-pages", type=int, default=20)
+
     business = sub.add_parser("business-model", help="Build a business-logic model from a JSON request trace")
     business.add_argument("path")
 
@@ -98,6 +105,22 @@ def main() -> None:
         ]
         for item in capabilities:
             print("[OK] " + item)
+        return
+
+    if args.command == "browser-crawl":
+        api = HackerOneClient(settings)
+        try:
+            scopes = normalize_scopes(api.structured_scopes(args.handle))
+        finally:
+            api.close()
+        mapper = AuthorizedBrowserMapper(scopes, max_pages=args.max_pages)
+        result, evidence = mapper.crawl(args.target, storage_state=args.storage_state)
+        print(json.dumps({
+            "pages": result.pages,
+            "requests": result.requests,
+            "storage_origins": result.storage_origins,
+            "evidence": [item.__dict__ for item in evidence],
+        }, indent=2))
         return
 
     if args.command == "browser-analyze":
