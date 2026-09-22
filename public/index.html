@@ -50,43 +50,34 @@ pre{white-space:pre-wrap;background:#080f1a;border:1px solid #25354d;border-radi
 </main>
 
 <script>
-let auth="";
 let token="";
-let submitEnabled=false;
+let connected=false;
 
-function basicHeader(){
-  return {"Authorization":"Basic "+btoa(auth)};
-}
 async function request(url, options){
   options=options||{};
-  const headers=Object.assign({},options.headers||{},basicHeader());
+  const headers=Object.assign({"Content-Type":"application/json"},options.headers||{});
   if(token) headers["X-Action-Token"]=token;
-  const res=await fetch(url,Object.assign({},options,{headers}));
+  const res=await fetch(url,Object.assign({credentials:"same-origin"},options,{headers}));
   const text=await res.text();
   let data; try{data=JSON.parse(text)}catch(e){data={detail:text}};
   if(!res.ok) throw new Error(data.detail||("HTTP "+res.status));
   return data;
 }
-function esc(v){
-  return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
-}
+function esc(v){return String(v).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 async function connect(){
-  const u=document.getElementById("user").value.trim();
-  const p=document.getElementById("pass").value;
-  document.getElementById("loginErr").textContent="";
-  if(!u||!p){document.getElementById("loginErr").textContent="Enter both fields.";return}
-  auth=u+":"+p;
+  const username=document.getElementById("user").value.trim();
+  const password=document.getElementById("pass").value;
+  const err=document.getElementById("loginErr");
+  err.textContent="";
+  if(!username||!password){err.textContent="Enter both fields.";return;}
   try{
-    const data=await request("/api/findings");
+    const data=await request("/api/auth/login",{method:"POST",body:JSON.stringify({username,password})});
     token=data.action_token||"";
-    submitEnabled=false;
+    connected=true;
     document.getElementById("login").classList.add("hidden");
     document.getElementById("app").classList.remove("hidden");
     await load();
-  }catch(e){
-    auth=""; token="";
-    document.getElementById("loginErr").textContent=e.message;
-  }
+  }catch(e){err.textContent=e.message;}
 }
 async function load(){
   try{
@@ -96,16 +87,16 @@ async function load(){
     document.getElementById("total").textContent=rows.length;
     document.getElementById("review").textContent=rows.filter(x=>x.state==="needs_review"||x.state==="draft").length;
     document.getElementById("submitMode").textContent="Controlled";
-    if(!rows.length){document.getElementById("list").innerHTML="<p class='muted'>No report candidates yet.</p>";return}
+    if(!rows.length){document.getElementById("list").innerHTML="<p class='muted'>No report candidates yet.</p>";return;}
     document.getElementById("list").innerHTML=rows.map(x=>{
       let b='<div class="finding card"><div style="display:flex;justify-content:space-between;gap:12px"><div><div class="title">'+esc(x.title||"Untitled")+'</div><div class="meta">'+esc(x.program_handle)+' · '+esc(x.target)+' · '+esc(x.severity||"review")+'</div></div><span class="badge">'+esc(x.state)+'</span></div>';
       b+='<div class="actions" style="margin-top:12px"><button onclick="view('+x.id+')">View report</button>';
       if(x.state==="needs_review"||x.state==="draft")b+='<button class="primary" onclick="approve('+x.id+')">✓ Approve</button>';
       if(x.state==="approved")b+='<button class="danger" onclick="submitFinding('+x.id+')">Submit to HackerOne</button>';
-      b+='</div><details id="d'+x.id+'"><summary>Evidence / report</summary><pre id="p'+x.id+'">Open to load…</pre></details></div>';
-      return b;
+      b+='</div><details id="d'+x.id+'"><summary>Evidence / report</summary><pre id="p'+x.id+'">Open to load…</pre></details></div>'; return b;
     }).join("");
   }catch(e){
+    if(e.message.toLowerCase().includes("connect")){logout();return;}
     document.getElementById("list").innerHTML="<p class='err'>"+esc(e.message)+"</p>";
   }
 }
@@ -121,14 +112,19 @@ async function approve(id){
 }
 async function submitFinding(id){
   if(!confirm("Submit this already-approved report to HackerOne?"))return;
-  alert("Submission is currently disabled until H1_ENABLE_SUBMISSION=true is explicitly enabled in Vercel.");
+  try{const d=await request("/api/findings/"+id+"/submit",{method:"POST"});alert("Submitted. Report ID: "+(((d.report||{}).data||{}).id||"unknown"));await load()}catch(e){alert(e.message)}
 }
 async function runWorker(){
   const b=document.getElementById("run"); b.disabled=true; b.textContent="Running…";
   try{const d=await request("/api/worker",{method:"POST"});alert(JSON.stringify(d,null,2));await load()}catch(e){alert(e.message)}
   finally{b.disabled=false;b.textContent="Run research cycle"}
 }
-function logout(){location.reload()}
+async function logout(){
+  try{await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin"})}catch(e){}
+  token=""; connected=false;
+  document.getElementById("app").classList.add("hidden");
+  document.getElementById("login").classList.remove("hidden");
+}
 </script>
 </body>
 </html>
