@@ -57,6 +57,8 @@ def _research_program(
         "program": handle,
         "targets_checked": 0,
         "created_findings": 0,
+        "evidence_collected": 0,
+        "checks_run": 0,
         "findings": [],
         "skipped": [],
         "status": "ok",
@@ -137,10 +139,18 @@ def _research_program(
         store.save_memory(f"{handle}:{target}", memory_items)
 
         evidence_json = [item.__dict__ for item in evidence]
+        result["evidence_collected"] = result.get("evidence_collected", 0) + len(evidence_json)
+        result["checks_run"] = result.get("checks_run", 0) + len(evidence_results)
+        result["research_trace"] = {
+            "checks": [item.name for item in evidence_results],
+            "evidence_count": len(evidence_json),
+            "deep": deep,
+            "active": active,
+        }
 
         if not llm_available:
             result["skipped"].append(
-                f"{target}: evidence collected, but no hosted LLM is configured on Vercel"
+                f"{target}: evidence collected, but no hosted LLM is configured; candidate drafting was skipped."
             )
             continue
 
@@ -151,6 +161,9 @@ def _research_program(
             continue
 
         if draft.get("status") != "candidate":
+            result["skipped"].append(
+                f"{target}: LLM evaluation returned status={draft.get('status')!r}; no bounty candidate was created from the collected evidence."
+            )
             continue
 
         try:
