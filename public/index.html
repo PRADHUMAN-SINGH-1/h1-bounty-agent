@@ -175,7 +175,7 @@ function renderPrograms(programs){
         <span class="badge">score ${p.triage_score}</span>
       </div>
       <div class="actions" style="margin-top:12px">
-        <button class="primary" data-full-research-handle="${handle}">Run Full Research</button>
+        <button class="primary" data-full-research-handle="${handle}">Hunt for bounty</button>
       </div>
     </div>`;
   }).join("");
@@ -189,7 +189,7 @@ function renderPrograms(programs){
 
 async function runFullResearch(handle){
   const status=document.getElementById("researchStatus");
-  status.textContent="Queueing deep research for "+handle+"…";
+  status.textContent="Starting bounty hunt for "+handle+"…";
   status.className="muted";
   document.querySelectorAll("[data-full-research-handle]").forEach(function(btn){btn.disabled=true;});
 
@@ -198,10 +198,10 @@ async function runFullResearch(handle){
       method:"POST",
       body:JSON.stringify({programs:[handle],mode:"full"})
     });
-    status.textContent="Job "+queued.job_id+" queued. Research is running in the background…";
+    status.textContent="Hunt job "+queued.job_id+" queued. Searching the authorized scope in the background…";
     await pollResearchJob(queued.job_id);
   }catch(e){
-    status.textContent="Full research could not start: "+e.message;
+    status.textContent="Bounty hunt could not start: "+e.message;
     status.className="err";
     alert(e.message);
   }finally{
