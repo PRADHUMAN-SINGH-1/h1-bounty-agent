@@ -176,19 +176,29 @@ def health() -> dict[str, Any]:
 @app.get("/api/findings")
 def list_findings(request: Request) -> dict[str, Any]:
     _require_session(request)
-    state = _read_state()
-    rows = list(state.get("findings", {}).values())
-    rows.sort(key=lambda row: int(row.get("id", 0)), reverse=True)
-    return {"findings": rows, "durable_storage": False, "action_token": _action_token()}
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+    store = Store(Settings())
+    try:
+        rows = store.list_findings()
+        return {"findings": rows, "durable_storage": store.durable, "action_token": _action_token()}
+    finally:
+        store.close()
 
 
 @app.get("/api/findings/{finding_id}")
 def get_finding(finding_id: int, request: Request) -> dict[str, Any]:
     _require_session(request)
-    row = _read_state().get("findings", {}).get(str(finding_id))
-    if row is None:
-        raise HTTPException(status_code=404, detail="Finding not found.")
-    return row
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+    store = Store(Settings())
+    try:
+        try:
+            return store.get_finding(finding_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Finding not found.") from exc
+    finally:
+        store.close()
 
 
 @app.post("/api/findings/{finding_id}/approve")
@@ -200,60 +210,58 @@ def approve_finding(
     _require_session(request)
     _verify_action_token(x_action_token)
 
-    state = _read_state()
-    row = state.get("findings", {}).get(str(finding_id))
-    if row is None:
-        raise HTTPException(status_code=404, detail="Finding not found.")
+    from h1_agent.config import Settings
+    from h1_agent.hackerone import HackerOneClient
+    from h1_agent.models import Evidence, Finding
+    from h1_agent.scope import normalize_scopes, target_is_in_scope
+    from h1_agent.store import Store
+    from h1_agent.validation import validate_finding
 
-    for key in ("title", "summary", "impact", "evidence", "reproduction"):
-        if not row.get(key):
-            raise HTTPException(status_code=400, detail=f"Finding is incomplete: {key}.")
-
+    store = Store(Settings())
     try:
-        from h1_agent.config import Settings
-        from h1_agent.hackerone import HackerOneClient
-        from h1_agent.scope import normalize_scopes, target_is_in_scope
-        from h1_agent.validation import validate_finding
-        from h1_agent.models import Evidence, Finding
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
+        try:
+            row = store.get_finding(finding_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Finding not found.") from exc
 
-    candidate = Finding(
-        program_handle=row["program_handle"],
-        target=row["target"],
-        title=row["title"],
-        severity=row.get("severity"),
-        state=row.get("state", "needs_review"),
-        summary=row["summary"],
-        impact=row["impact"],
-        reproduction=row["reproduction"],
-        evidence=[Evidence(**item) for item in row["evidence"]],
-        structured_scope_id=row.get("structured_scope_id"),
-        weakness_id=row.get("weakness_id"),
-        metadata=row.get("metadata") or {},
-    )
-    validation = validate_finding(candidate)
-    if not validation.ok:
-        raise HTTPException(
-            status_code=400,
-            detail="Report completeness check failed: " + "; ".join(validation.blockers),
+        for key in ("title", "summary", "impact", "evidence", "reproduction"):
+            if not row.get(key):
+                raise HTTPException(status_code=400, detail=f"Finding is incomplete: {key}.")
+
+        candidate = Finding(
+            program_handle=row["program_handle"],
+            target=row["target"],
+            title=row["title"],
+            severity=row.get("severity"),
+            state=row.get("state", "needs_review"),
+            summary=row["summary"],
+            impact=row["impact"],
+            reproduction=row["reproduction"],
+            evidence=[Evidence(**item) for item in row["evidence"]],
+            structured_scope_id=row.get("structured_scope_id"),
+            weakness_id=row.get("weakness_id"),
+            metadata=row.get("metadata") or {},
         )
+        validation = validate_finding(candidate)
+        if not validation.ok:
+            raise HTTPException(
+                status_code=400,
+                detail="Report completeness check failed: " + "; ".join(validation.blockers),
+            )
 
-    settings = Settings()
-    api = HackerOneClient(settings)
-    try:
-        scopes = normalize_scopes(api.structured_scopes(row["program_handle"]))
-        ok, asset, reason = target_is_in_scope(row["target"], scopes)
-        if not ok or asset is None or not asset.eligible_for_submission:
-            raise HTTPException(status_code=400, detail=f"Current scope check failed: {reason}")
+        api = HackerOneClient(Settings())
+        try:
+            scopes = normalize_scopes(api.structured_scopes(row["program_handle"]))
+            ok, asset, reason = target_is_in_scope(row["target"], scopes)
+            if not ok or asset is None or not asset.eligible_for_submission:
+                raise HTTPException(status_code=400, detail=f"Current scope check failed: {reason}")
+        finally:
+            api.close()
+
+        store.set_state(finding_id, "approved")
+        return {"status": "approved", "finding": store.get_finding(finding_id)}
     finally:
-        api.close()
-
-    row["state"] = "approved"
-    row["approved_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    state["findings"][str(finding_id)] = row
-    _write_state(state)
-    return {"status": "approved", "finding": row}
+        store.close()
 
 
 @app.post("/api/findings/{finding_id}/submit")
@@ -265,71 +273,68 @@ def submit_finding(
     _require_session(request)
     _verify_action_token(x_action_token)
 
-    if os.getenv("H1_ENABLE_SUBMISSION", "false").strip().lower() != "true":
-        raise HTTPException(status_code=403, detail="HackerOne submission is disabled.")
-
-    state = _read_state()
-    row = state.get("findings", {}).get(str(finding_id))
-    if row is None:
-        raise HTTPException(status_code=404, detail="Finding not found.")
-    if row.get("state") != "approved":
-        raise HTTPException(status_code=400, detail="Only an approved finding can be submitted.")
-
-    try:
-        from h1_agent.config import Settings
-        from h1_agent.hackerone import HackerOneClient
-        from h1_agent.models import Evidence, Finding
-        from h1_agent.reporting import markdown_report
-        from h1_agent.validation import require_human_approval
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
-
-    finding = Finding(
-        program_handle=row["program_handle"],
-        target=row["target"],
-        title=row["title"],
-        severity=row.get("severity"),
-        state="approved",
-        summary=row["summary"],
-        impact=row["impact"],
-        reproduction=row["reproduction"],
-        evidence=[Evidence(**item) for item in row["evidence"]],
-        structured_scope_id=row.get("structured_scope_id"),
-        weakness_id=row.get("weakness_id"),
-        metadata=row.get("metadata") or {},
-    )
-
-    try:
-        require_human_approval(finding)
-    except (ValueError, PermissionError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from h1_agent.config import Settings
+    from h1_agent.hackerone import HackerOneClient
+    from h1_agent.models import Evidence, Finding
+    from h1_agent.reporting import markdown_report
+    from h1_agent.store import Store
+    from h1_agent.validation import require_human_approval
 
     settings = Settings()
-    api = HackerOneClient(settings)
-    try:
-        payload = api.create_report(
-            team_handle=finding.program_handle,
-            title=finding.title,
-            vulnerability_information=markdown_report(finding),
-            impact=finding.impact,
-            severity_rating=finding.severity or "none",
-            weakness_id=finding.weakness_id,
-            structured_scope_id=(
-                int(finding.structured_scope_id)
-                if str(finding.structured_scope_id or "").isdigit()
-                else None
-            ),
-        )
-    finally:
-        api.close()
+    if not settings.enable_submission:
+        raise HTTPException(status_code=403, detail="HackerOne submission is disabled.")
 
-    row["state"] = "submitted"
-    row["report_json"] = payload
-    row["submitted_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    row["h1_report_id"] = str(payload.get("data", {}).get("id") or "")
-    state["findings"][str(finding_id)] = row
-    _write_state(state)
-    return {"status": "submitted", "report": payload}
+    store = Store(settings)
+    try:
+        try:
+            row = store.get_finding(finding_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Finding not found.") from exc
+        if row.get("state") != "approved":
+            raise HTTPException(status_code=400, detail="Only an approved finding can be submitted.")
+
+        finding = Finding(
+            program_handle=row["program_handle"],
+            target=row["target"],
+            title=row["title"],
+            severity=row.get("severity"),
+            state="approved",
+            summary=row["summary"],
+            impact=row["impact"],
+            reproduction=row["reproduction"],
+            evidence=[Evidence(**item) for item in row["evidence"]],
+            structured_scope_id=row.get("structured_scope_id"),
+            weakness_id=row.get("weakness_id"),
+            metadata=row.get("metadata") or {},
+        )
+
+        try:
+            require_human_approval(finding)
+        except (ValueError, PermissionError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        api = HackerOneClient(settings)
+        try:
+            payload = api.create_report(
+                team_handle=finding.program_handle,
+                title=finding.title,
+                vulnerability_information=markdown_report(finding),
+                impact=finding.impact,
+                severity_rating=finding.severity or "none",
+                weakness_id=finding.weakness_id,
+                structured_scope_id=(
+                    int(finding.structured_scope_id)
+                    if str(finding.structured_scope_id or "").isdigit()
+                    else None
+                ),
+            )
+        finally:
+            api.close()
+
+        store.mark_submitted(finding_id, payload)
+        return {"status": "submitted", "report": payload}
+    finally:
+        store.close()
 
 
 @app.get("/api/capabilities")
