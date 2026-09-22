@@ -99,7 +99,7 @@ async function loadFindings() {
       html += '<span class="badge">'+esc(row.state)+'</span></div>';
       html += '<div class="actions" style="margin-top:14px">';
       html += '<button onclick="viewFinding('+row.id+')">View report</button>';
-      if (row.state === "needs_review" || row.state === "draft") html += '<button class="primary" onclick="approveFinding('+row.id+')">✓ Approve</button>';
+      if (row.state === "needs_review" || row.state === "draft") html += SUBMIT_ENABLED ? '<button class="primary" onclick="validateAndSubmit('+row.id+')">✓ Validate &amp; Submit</button>' : '<button class="primary" onclick="approveFinding('+row.id+')">✓ Approve</button>';
       if (row.state === "approved" && SUBMIT_ENABLED) html += '<button class="danger" onclick="submitFinding('+row.id+')">Submit to HackerOne</button>';
       html += '</div><details id="detail-'+row.id+'"><summary>Evidence / report</summary><pre id="pre-'+row.id+'">Open to load…</pre></details></div>';
       return html;
@@ -120,6 +120,15 @@ async function approveFinding(id) {
 async function submitFinding(id) {
   if (!confirm("Submit this already-approved report to HackerOne?")) return;
   try {
+    const data = await request("/api/findings/"+id+"/submit",{method:"POST"});
+    alert("Submitted. HackerOne report ID: "+((((data||{}).report||{}).data||{}).id || "unknown"));
+    await loadFindings();
+  } catch (err) { alert(err.message); }
+}
+async function validateAndSubmit(id) {
+  if (!confirm("Confirm that you personally reproduced the issue, verified the current HackerOne scope and rules, checked the evidence and duplicate status, and want to submit this report?")) return;
+  try {
+    await request("/api/findings/"+id+"/approve",{method:"POST"});
     const data = await request("/api/findings/"+id+"/submit",{method:"POST"});
     alert("Submitted. HackerOne report ID: "+((((data||{}).report||{}).data||{}).id || "unknown"));
     await loadFindings();
