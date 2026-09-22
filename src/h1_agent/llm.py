@@ -51,7 +51,7 @@ class LLMClient:
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.05,
-                    "max_tokens": 1600,
+                    "max_tokens": 3500,
                     "stream": False,
                 },
                 timeout=180,
@@ -85,7 +85,7 @@ class LLMClient:
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.05,
-                    "max_tokens": 1600,
+                    "max_tokens": 3500,
                     "stream": False,
                 },
                 timeout=180,
@@ -105,7 +105,7 @@ class LLMClient:
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.05,
-                    "max_tokens": 1600,
+                    "max_tokens": 3500,
                     "stream": False,
                 },
                 timeout=180,
@@ -123,7 +123,51 @@ class LLMClient:
             raise ValueError("Model did not return JSON")
         return json.loads(text[start : end + 1])
 
-    def draft_finding(self, program_handle: str, target: str, evidence: list[dict]) -> dict:
+    def triage_evidence(
+        self,
+        program_handle: str,
+        target: str,
+        program_context: dict,
+        evidence: list[dict],
+    ) -> dict:
+        prompt = f"""
+You are the senior triage stage of an authorized bug-bounty research pipeline.
+Your task is to find *testable security hypotheses* in the supplied evidence without inventing facts.
+
+Return JSON:
+{{
+  "leads": [
+    {{
+      "name": "...",
+      "evidence_indices": [0, 1],
+      "hypothesis": "...",
+      "why_security_relevant": "...",
+      "required_validation": ["..."],
+      "potential_impact": "none|low|medium|high|critical"
+    }}
+  ]
+}}
+
+Rules:
+- Use only supplied evidence.
+- An observation is not a vulnerability. Missing headers, banners, public robots.txt, reflected harmless text,
+  or exposed documentation are not sufficient on their own.
+- Prefer leads that demonstrate a security boundary, object ownership issue, privilege boundary,
+  unintended data exposure, dangerous workflow transition, or material confidentiality/integrity/availability impact.
+- Do not invent authentication, authorization, accounts, roles, object IDs, or exploit results.
+- Return at most 8 leads, ordered by evidentiary strength.
+- Evidence indices are zero-based and must point to supplied evidence items.
+
+PROGRAM_CONTEXT={json.dumps(program_context, indent=2)[:16000]}
+PROGRAM={program_handle}
+TARGET={target}
+PROGRAM_CONTEXT={json.dumps(program_context if 'program_context' in locals() else {}, indent=2)[:16000]}
+LEADS={json.dumps(leads or [], indent=2)}
+EVIDENCE={json.dumps(evidence, indent=2)}
+"""
+        return self.json(prompt)
+
+    def draft_finding(self, program_handle: str, target: str, evidence: list[dict], leads: list[dict] | None = None) -> dict:
         prompt = f"""
 You are an evidence-grounded assistant in an authorized bug bounty workflow.
 
