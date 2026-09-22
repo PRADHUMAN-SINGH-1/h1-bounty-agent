@@ -160,6 +160,7 @@ function renderPrograms(programs){
       </div>
       <div class="actions" style="margin-top:12px">
         <button class="primary" data-research-handle="${handle}">Research passively</button>
+        <button class="danger" data-assess-handle="${handle}">Deep vulnerability assessment</button>
       </div>
     </div>`;
   }).join("");
@@ -169,6 +170,32 @@ function renderPrograms(programs){
       researchProgram(btn.getAttribute("data-research-handle"));
     });
   });
+  root.querySelectorAll("[data-assess-handle]").forEach(function(btn){
+    btn.addEventListener("click", function(){
+      assessProgram(btn.getAttribute("data-assess-handle"));
+    });
+  });
+}
+
+async function assessProgram(handle){
+  if(!confirm("Confirm you reviewed the current HackerOne program policy, scope, exclusions and testing rules, and explicitly authorize the deeper non-destructive vulnerability assessment for this in-scope program. Continue?")) return;
+
+  const status=document.getElementById("researchStatus");
+  status.textContent="Starting deep vulnerability assessment for "+handle+"…";
+  status.className="muted";
+  document.querySelectorAll("[data-research-handle],[data-assess-handle]").forEach(function(btn){btn.disabled=true;});
+
+  try{
+    const d=await request("/api/worker",{method:"POST",body:JSON.stringify({programs:[handle],active:true})});
+    renderResult(d);
+    await load();
+  }catch(e){
+    status.textContent="Assessment failed: "+e.message;
+    status.className="err";
+    alert(e.message);
+  }finally{
+    document.querySelectorAll("[data-research-handle],[data-assess-handle]").forEach(function(btn){btn.disabled=false;});
+  }
 }
 
 async function researchProgram(handle){
