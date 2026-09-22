@@ -26,7 +26,7 @@ Optional HackerOne submission
 
 The project is intentionally **fail-closed**. A target must match an eligible structured scope before the research engine can send target traffic.
 
-## Current v0.6 — deep research & verification
+## Current v0.8 — one-click full research & verification
 
 - HackerOne Hacker API client
 - Program discovery and structured-scope retrieval
@@ -36,7 +36,7 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Local Ollama LLM integration
 - Hosted Hugging Face OpenAI-compatible LLM adapter
 - Low-impact HTTP evidence collection
-- Scope-gated deep vulnerability assessment mode
+- One-click full research mode that runs the complete non-destructive research pipeline
 - Same-origin link/query/JavaScript attack-surface discovery without form submission
 - OpenAPI/Swagger GET-operation extraction
 - Read-only endpoint inventory for discovered API surfaces
@@ -64,7 +64,7 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Explicit submission gate
 - Vercel Python/ASGI entrypoints
 - Vercel daily discovery/research worker with explicit program allowlist
-- Dashboard program selection with human authorization for low-impact passive research
+- Dashboard program selection with one-click full research per program
 - Authenticated web review dashboard with one-click Validate & Submit
 - GitHub Actions CI
 
@@ -90,7 +90,7 @@ After Vercel rebuilds from the latest `main` commit:
 - `/api/worker` runs one on-demand cycle after dashboard authentication.
 - `/` opens the review dashboard.
 
-The cron worker supports discovery and an optional passive-research mode. Discovery runs automatically. Passive research can be enabled with `AUTONOMOUS_PASSIVE_RESEARCH=true` plus an explicit `RESEARCH_PROGRAM_ALLOWLIST`; it performs only the low-impact checks implemented in the research engine. Deep vulnerability assessment is explicitly user-triggered and separately gated by `ALLOW_ACTIVE_TESTS=true`. Two-account authorization testing is an additional opt-in with `ALLOW_AUTHZ_TESTS=true` and two explicitly supplied test-account headers. The assessment engine remains scope-gated and uses non-destructive GET/OPTIONS-style probes; it does not submit forms, brute-force credentials, exploit destructive payloads, or scan outside the selected HackerOne structured scope. Neither mode submits reports automatically.
+The scheduled worker remains discovery-first. The dashboard now exposes a single **Run Full Research** action per selected program. Full research runs the complete non-destructive research pipeline automatically: attack-surface discovery, workflow/business-logic modeling, hypothesis generation, CORS/reflection/redirect/error indicators, API/OpenAPI/GraphQL/WebSocket analysis, cloud/IAM indicators, attack-chain correlation, recon diffs, persistent research memory, and evidence-grounded LLM report drafting. This deep read-only research path does not depend on `ALLOW_ACTIVE_TESTS`. Two-account authorization testing is still opt-in with `ALLOW_AUTHZ_TESTS=true` and two explicitly supplied authorized test-account headers, and state-changing execution remains separately gated. All research remains structured-scope gated, does not submit forms or brute-force credentials, and never scans outside the selected HackerOne scope. Reports remain human-approved before submission.
 
 Current Vercel scheduling depends on the plan: Hobby currently provides daily Cron execution with per-hour precision, while Pro/Enterprise support more frequent scheduling.
 
@@ -165,7 +165,7 @@ To deploy:
 
 1. Open Render and choose **New → Blueprint**.
 2. Connect `PRADHUMAN-SINGH-1/h1-bounty-agent`.
-3. Render reads `render.yaml` and provisions the web service, cron job, and Postgres database.
+3. Render reads `render.yaml` and provisions the web service and Postgres database.
 4. Enter the prompted secrets: HackerOne API credentials, dashboard username/password, and your LLM provider credentials.
 5. Open the generated `onrender.com` URL and use the existing H1 dashboard.
 
