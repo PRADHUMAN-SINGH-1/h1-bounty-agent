@@ -107,8 +107,7 @@ async function load(){
     document.getElementById("list").innerHTML=rows.map(x=>{
       let b='<div class="finding card"><div style="display:flex;justify-content:space-between;gap:12px"><div><div class="title">'+esc(x.title||"Untitled")+'</div><div class="meta">'+esc(x.program_handle)+' · '+esc(x.target)+' · '+esc(x.severity||"review")+'</div></div><span class="badge">'+esc(x.state)+'</span></div>';
       b+='<div class="actions" style="margin-top:12px"><button data-view-id="${x.id}">View report</button>';
-      if(x.state==="needs_review"||x.state==="draft")b+='<button class="primary" data-approve-id="${x.id}">✓ Approve</button>';
-      if(x.state==="approved")b+='<button class="danger" data-submit-id="${x.id}">Submit to HackerOne</button>';
+      if(x.state==="needs_review"||x.state==="draft")b+='<button class="primary" data-approve-id="${x.id}">✓ Approve & Submit</button>';
       b+='</div><details id="d'+x.id+'"><summary>Evidence / report</summary><pre id="p'+x.id+'">Open to load…</pre></details></div>'; return b;
     }).join("");
 
@@ -117,9 +116,6 @@ async function load(){
     });
     document.querySelectorAll("[data-approve-id]").forEach(function(btn){
       btn.addEventListener("click", function(){ approve(Number(btn.getAttribute("data-approve-id"))); });
-    });
-    document.querySelectorAll("[data-submit-id]").forEach(function(btn){
-      btn.addEventListener("click", function(){ submitFinding(Number(btn.getAttribute("data-submit-id"))); });
     });
   }catch(e){
     if(e.message.toLowerCase().includes("connect")){logout();return;}
@@ -146,12 +142,17 @@ async function view(id){
   }catch(e){alert(e.message)}
 }
 async function approve(id){
-  if(!confirm("Confirm that you personally reproduced the issue, verified current scope/rules, checked evidence and duplicates, and approve this report?"))return;
-  try{await request("/api/findings/"+id+"/approve",{method:"POST"});await load()}catch(e){alert(e.message)}
-}
-async function submitFinding(id){
-  if(!confirm("Submit this already-approved report to HackerOne?"))return;
-  try{const d=await request("/api/findings/"+id+"/submit",{method:"POST"});alert("Submitted. Report ID: "+(((d.report||{}).data||{}).id||"unknown"));await load()}catch(e){alert(e.message)}
+  if(!confirm("Confirm that you personally reproduced the issue, verified current scope/rules, checked evidence and duplicates, and approve this report for HackerOne submission?"))return;
+  try{
+    await request("/api/findings/"+id+"/approve",{method:"POST"});
+    try{
+      const submitted=await request("/api/findings/"+id+"/submit",{method:"POST"});
+      alert("Approved and submitted. Report ID: "+(((submitted.report||{}).data||{}).id||"unknown"));
+    }catch(submitError){
+      alert("Finding approved, but HackerOne submission did not complete: "+submitError.message);
+    }
+    await load();
+  }catch(e){alert(e.message)}
 }
 async function scanPrograms(){
   const b=document.getElementById("run"); const s=document.getElementById("scanBtn"); b.disabled=true; s.disabled=true; b.textContent="Scanning…"; s.textContent="Scanning…";
