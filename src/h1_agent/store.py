@@ -31,6 +31,8 @@ class Store:
                 "programs": {},
                 "scopes": {},
                 "findings": {},
+                "research_memory": {},
+                "surface_snapshots": {},
             })
 
     @property
@@ -44,7 +46,7 @@ class Store:
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
-            return {"programs": {}, "scopes": {}, "findings": {}}
+            return {"programs": {}, "scopes": {}, "findings": {}, "research_memory": {}, "surface_snapshots": {}}
 
     def _write(self, state: dict[str, Any]) -> None:
         fd, tmp = tempfile.mkstemp(
@@ -84,6 +86,30 @@ class Store:
             "fetched_at": utc_now(),
         }
         self._write(state)
+
+    def save_memory(self, scope_key: str, items: list[dict[str, Any]]) -> None:
+        state = self._read()
+        state.setdefault("research_memory", {})[scope_key] = {
+            "items": items[-200:],
+            "updated_at": utc_now(),
+        }
+        self._write(state)
+
+    def get_memory(self, scope_key: str) -> list[dict[str, Any]]:
+        state = self._read()
+        return list(state.get("research_memory", {}).get(scope_key, {}).get("items", []))
+
+    def save_surface_snapshot(self, scope_key: str, urls: list[str]) -> dict[str, Any]:
+        state = self._read()
+        previous = list(state.get("surface_snapshots", {}).get(scope_key, {}).get("urls", []))
+        snapshot = {"urls": sorted(set(urls))[:500], "updated_at": utc_now()}
+        state.setdefault("surface_snapshots", {})[scope_key] = snapshot
+        self._write(state)
+        return {"previous": previous, "current": snapshot["urls"]}
+
+    def get_surface_snapshot(self, scope_key: str) -> list[str]:
+        state = self._read()
+        return list(state.get("surface_snapshots", {}).get(scope_key, {}).get("urls", []))
 
     def create_finding(self, data: dict[str, Any]) -> int:
         state = self._read()
