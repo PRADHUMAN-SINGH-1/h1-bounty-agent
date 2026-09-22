@@ -44,8 +44,10 @@ def test_async_job_api_exists():
     source = Path("api/index.py").read_text(encoding="utf-8")
     assert '@app.post("/api/research/jobs")' in source
     assert '@app.get("/api/research/jobs/{job_id}")' in source
-    assert "BackgroundTasks" in source
-    assert "_run_research_job" in source
+    assert "create_research_job" in source
+    assert "BackgroundTasks" not in source
+    runner = Path("scripts/research_runner.py").read_text(encoding="utf-8")
+    assert "claim_next_research_job" in runner
 
 
 def test_dashboard_polls_research_jobs():
