@@ -10,10 +10,13 @@ from .llm import LLMClient
 from .research import LowImpactResearch, flatten
 from .scope import normalize_scopes
 from .store import Store
-from .models import Evidence
+from .models import Evidence, Finding
 from .asset_intelligence import analyze_asset
 from .toolchain import run_deep_toolchain
 from .pattern_library import relevant_patterns
+from .reporting import markdown_report
+from .scope import target_is_in_scope
+from .validation import validate_finding
 from .recon_diff import compare_surfaces
 from .research_memory import make_memory
 
@@ -92,6 +95,67 @@ def _select_targets(scopes, max_targets: int, *, exhaustive: bool = False):
         for asset in _select_research_assets(scopes, max_targets, exhaustive=exhaustive)
         if (target := _target_for_asset(asset))
     ]
+
+
+def _maybe_auto_submit(
+    settings: Settings,
+    api: HackerOneClient,
+    store: Store,
+    finding_id: int,
+    handle: str,
+    target: str,
+    title: str,
+    severity: str | None,
+    summary: str,
+    impact: str,
+    reproduction: list,
+    evidence_json: list[dict],
+    asset,
+    metadata: dict,
+) -> dict | None:
+    if not settings.auto_submit_findings:
+        return None
+    if not settings.enable_submission or not settings.hackerone_api_token:
+        return {"status": "blocked", "reason": "automatic submission gate is not fully enabled"}
+    if settings.dry_run:
+        return {"status": "blocked", "reason": "DRY_RUN is enabled"}
+    if severity not in {"high", "critical"}:
+        return {"status": "blocked", "reason": "automatic submission requires high/critical severity"}
+    if not reproduction or len(evidence_json) < 10:
+        return {"status": "blocked", "reason": "insufficient reproduction/evidence"}
+    if metadata.get("missing_validation"):
+        return {"status": "blocked", "reason": "finding still requires validation"}
+    ok, scoped_asset, reason = target_is_in_scope(target, api.normalized_scopes_cache.get(handle, [])) if hasattr(api, "normalized_scopes_cache") else (True, asset, "")
+    if not ok or scoped_asset is None:
+        return {"status": "blocked", "reason": f"scope validation failed: {reason}"}
+    finding = Finding(
+        program_handle=handle,
+        target=target,
+        title=title,
+        severity=severity,
+        state="approved",
+        summary=summary,
+        impact=impact,
+        reproduction=reproduction,
+        evidence=[],
+        structured_scope_id=asset.id,
+        weakness_id=metadata.get("weakness_id"),
+        metadata=metadata,
+    )
+    validation = validate_finding(finding)
+    if not validation.ok:
+        return {"status": "blocked", "reason": "; ".join(validation.blockers)}
+    payload = api.create_report(
+        team_handle=handle,
+        title=title,
+        vulnerability_information=markdown_report(finding),
+        impact=impact,
+        severity_rating=severity,
+        weakness_id=metadata.get("weakness_id"),
+        structured_scope_id=int(asset.id) if str(asset.id).isdigit() else None,
+    )
+    store.mark_submitted(finding_id, payload)
+    return {"status": "submitted", "report_id": str(payload.get("data", {}).get("id") or "")}
 
 
 def _research_program(
