@@ -244,6 +244,7 @@ def submit_finding(
         from h1_agent.hackerone import HackerOneClient
         from h1_agent.models import Evidence, Finding
         from h1_agent.reporting import markdown_report
+        from h1_agent.validation import require_human_approval
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
 
@@ -261,6 +262,11 @@ def submit_finding(
         weakness_id=row.get("weakness_id"),
         metadata=row.get("metadata") or {},
     )
+
+    try:
+        require_human_approval(finding)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     settings = Settings()
     api = HackerOneClient(settings)
