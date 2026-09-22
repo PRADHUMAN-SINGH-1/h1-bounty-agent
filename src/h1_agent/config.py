@@ -39,6 +39,27 @@ def _csv(name: str) -> tuple[str, ...]:
     return tuple(x.strip() for x in _raw(name).split(",") if x.strip())
 
 
+def _llm_provider() -> str:
+    configured = _raw("LLM_PROVIDER", "")
+    if os.getenv("VERCEL"):
+        # Never let the local Ollama setting leak into a deployed Vercel worker.
+        if configured in {"", "ollama"}:
+            return "vercel_gateway"
+    return configured or "ollama"
+
+
+def _llm_base_url(provider: str) -> str:
+    if provider in {"vercel_gateway", "ai_gateway"}:
+        return _raw("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1")
+    return _raw("LLM_BASE_URL", "http://127.0.0.1:11434")
+
+
+def _llm_model(provider: str) -> str:
+    if provider in {"vercel_gateway", "ai_gateway"}:
+        return _raw("LLM_MODEL", "inclusionai/ling-3.0-flash-vl-free")
+    return _raw("LLM_MODEL", "llama3.1:8b")
+
+
 @dataclass(frozen=True)
 class Settings:
     hackerone_username: str = _raw("HACKERONE_USERNAME")
