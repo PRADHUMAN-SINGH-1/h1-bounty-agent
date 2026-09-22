@@ -23,7 +23,7 @@ class LLMClient:
     def available(self) -> bool:
         if self.provider in {"vercel_gateway", "ai_gateway"}:
             return bool(self._gateway_token())
-        if self.provider == "ollama":        if self.provider == "ollama":
+        if self.provider == "ollama":
             try:
                 return httpx.get(f"{self.base_url}/api/tags", timeout=3).is_success
             except httpx.HTTPError:
@@ -60,7 +60,6 @@ class LLMClient:
             data = response.json()
             return str(data["choices"][0]["message"]["content"])
 
-        if self.provider == "ollama":
         if self.provider == "ollama":
             response = httpx.post(
                 f"{self.base_url}/api/generate",
