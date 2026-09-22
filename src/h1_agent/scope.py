@@ -18,6 +18,11 @@ def normalize_scopes(api_json: dict) -> list[ScopeAsset]:
                 eligible_for_bounty=bool(attrs.get("eligible_for_bounty", False)),
                 eligible_for_submission=bool(attrs.get("eligible_for_submission", True)),
                 instruction=str(attrs.get("instruction") or ""),
+                max_severity=str(attrs.get("max_severity") or "") or None,
+                confidentiality_requirement=str(attrs.get("confidentiality_requirement") or "") or None,
+                integrity_requirement=str(attrs.get("integrity_requirement") or "") or None,
+                availability_requirement=str(attrs.get("availability_requirement") or "") or None,
+                reference=str(attrs.get("reference") or "") or None,
             )
         )
     return result
