@@ -6,7 +6,7 @@ import json
 from .config import Settings
 from .discovery import rank
 from .hackerone import HackerOneClient
-from .llm import LocalLLM
+from .llm import LLMClient
 from .models import Evidence, Finding
 from .reporting import markdown_report
 from .research import LowImpactResearch, flatten
@@ -173,9 +173,9 @@ def main() -> None:
             store.save_scopes(args.handle, scope_payload)
 
             attrs = program_payload.get("data", {}).get("attributes", {})
-            llm = LocalLLM(settings)
+            llm = LLMClient(settings)
             if not llm.available():
-                raise SystemExit("Local Ollama is unavailable. Start Ollama and set LLM_MODEL.")
+                raise SystemExit("LLM provider is unavailable. Configure a local or hosted provider.")
 
             result = llm.research_plan(
                 args.handle,
@@ -208,6 +208,10 @@ def main() -> None:
                 raise SystemExit(
                     "Pass --active only after reviewing the current program policy."
                 )
+            if not settings.allow_active_tests:
+                raise SystemExit(
+                    "Active testing is disabled by ALLOW_ACTIVE_TESTS. Review the current program policy before enabling it."
+                )
 
             scopes = normalize_scopes(api.structured_scopes(args.handle))
             ok, asset, reason = target_is_in_scope(args.target, scopes)
@@ -216,7 +220,7 @@ def main() -> None:
 
             engine = LowImpactResearch(settings, scopes)
             try:
-                results = engine.run(args.target)
+                results = engine.run(args.target, active=True)
             finally:
                 engine.close()
 
