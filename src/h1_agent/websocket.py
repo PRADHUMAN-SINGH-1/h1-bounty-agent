@@ -11,7 +11,7 @@ from .scope import target_is_in_scope
 
 def discover_websocket_urls(text: str, base_url: str, scopes) -> list[str]:
     found = set()
-        for match in re.finditer(r"""wss?://[^"'\s<>]+""", text, flags=re.I):
+    for match in re.finditer(r"""wss?://[^"'\s<>]+""", text, flags=re.I):
         url = match.group(0)
         scope_url = url.replace("ws://", "https://").replace("wss://", "https://")
         if target_is_in_scope(scope_url, scopes)[0]:
