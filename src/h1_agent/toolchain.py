@@ -179,7 +179,14 @@ def run_deep_toolchain(
                 result = _run("nuclei", nuclei_args, timeout=1800)
                 runs.append(result)
                 for line in result.lines[:2000]:
-                    evidence.append(Evidence("nuclei_match", line[:7000], "nuclei"))
+                    try:
+                        item = json.loads(line)
+                        matched = str(item.get("matched-at") or item.get("host") or item.get("url") or "nuclei")
+                        detail = json.dumps(item, ensure_ascii=False)[:7000]
+                    except json.JSONDecodeError:
+                        matched = "nuclei"
+                        detail = line[:7000]
+                    evidence.append(Evidence("nuclei_match", detail, matched))
 
     if active and roots:
         evidence.append(
