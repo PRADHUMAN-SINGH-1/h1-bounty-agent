@@ -22,8 +22,10 @@ from .vulnerability_checks import (
     cookie_probe,
     cors_probe,
     discover_page,
+    error_injection_probe,
     interesting_query_links,
     mixed_content_probe,
+    sensitive_response_probe,
     open_redirect_probe,
     reflection_probe,
     sourcemap_probe,
@@ -214,6 +216,10 @@ class LowImpactResearch:
                 if status != "skipped":
                     checks.append(CheckResult("open_redirect_probe", status, f"Redirect parameter check for {url}", evidence))
 
+                status, evidence = error_injection_probe(url, self._get)
+                if status != "skipped":
+                    checks.append(CheckResult("injection_error_probe", status, f"Error-based injection check for {url}", evidence))
+
         status, evidence = sourcemap_probe(self.client, in_scope_scripts, base, self._get)
         checks.append(CheckResult("sourcemap_probe", status, status.replace("_", " "), evidence))
 
@@ -237,6 +243,27 @@ class LowImpactResearch:
                         )
             except httpx.HTTPError:
                 continue
+
+        api_candidates = [
+            endpoint.url
+            for endpoint in unique_surface
+            if target_is_in_scope(endpoint.url, self.scopes)[0]
+            and (
+                "/api/" in endpoint.url.lower()
+                or "/graphql" in endpoint.url.lower()
+                or "/rest/" in endpoint.url.lower()
+                or "/v1/" in endpoint.url.lower()
+                or "/v2/" in endpoint.url.lower()
+            )
+        ]
+        for api_url in api_candidates[:8]:
+            status, evidence = sensitive_response_probe(api_url, self._get)
+            checks.append(CheckResult(
+                "sensitive_response_probe",
+                status,
+                f"Read-only API response inspection for {api_url}",
+                evidence,
+            ))
 
         if openapi_endpoints:
             seen_openapi = set()
