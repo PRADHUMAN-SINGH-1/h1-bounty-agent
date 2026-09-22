@@ -44,10 +44,7 @@ class Settings:
     hackerone_username: str = _raw("HACKERONE_USERNAME")
     hackerone_api_token: str = _raw("HACKERONE_API_TOKEN")
     hackerone_base_url: str = _raw("HACKERONE_BASE_URL", "https://api.hackerone.com")
-    database_path: str = _raw(
-        "DATABASE_PATH",
-        "/tmp/h1_agent.sqlite3" if os.getenv("VERCEL") else "data/h1_agent.sqlite3",
-    )
+    database_path: str = _raw("DATABASE_PATH", "/tmp/h1-findings.json")
 
     dry_run: bool = _bool("DRY_RUN", True)
     allow_active_tests: bool = _bool("ALLOW_ACTIVE_TESTS", False)
