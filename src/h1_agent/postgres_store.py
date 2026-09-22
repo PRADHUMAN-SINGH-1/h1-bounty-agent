@@ -80,6 +80,19 @@ class PostgresStore:
                 updated_at TIMESTAMPTZ NOT NULL
             )
             """,
+            """
+            CREATE TABLE IF NOT EXISTS h1_research_jobs (
+                id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                programs JSONB NOT NULL DEFAULT '[]'::jsonb,
+                mode TEXT NOT NULL DEFAULT 'full',
+                progress JSONB NOT NULL DEFAULT '{}'::jsonb,
+                result JSONB,
+                error TEXT,
+                created_at TIMESTAMPTZ NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL
+            )
+            """,
         ]
         with self._connect() as conn:
             for statement in statements:
@@ -274,3 +287,61 @@ class PostgresStore:
             return []
         value = row["urls"]
         return json.loads(value) if isinstance(value, str) else list(value or [])
+
+    def create_research_job(self, data: dict[str, Any]) -> str:
+        with self._connect() as conn:
+            row = conn.execute("SELECT id FROM h1_research_jobs ORDER BY created_at DESC LIMIT 1").fetchone()
+            previous = str(row["id"]) if row else ""
+            number = int(previous.rsplit("-", 1)[-1]) + 1 if previous.rsplit("-", 1)[-1].isdigit() else 1
+            job_id = f"job-{number}"
+            now = utc_now()
+            conn.execute(
+                """
+                INSERT INTO h1_research_jobs(id, status, programs, mode, progress, result, created_at, updated_at)
+                VALUES (%s, 'queued', %s, %s, %s, NULL, %s, %s)
+                """,
+                (job_id, json.dumps(list(data.get("programs", []))), data.get("mode", "full"),
+                 json.dumps({"program": None, "target": None, "completed_targets": 0, "planned_targets": 0}),
+                 now, now),
+            )
+        return job_id
+
+    def update_research_job(self, job_id: str, patch: dict[str, Any]) -> None:
+        existing = self.get_research_job(job_id)
+        merged = dict(existing)
+        merged.update(patch)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE h1_research_jobs
+                SET status=%s, programs=%s, mode=%s, progress=%s, result=%s, error=%s, updated_at=%s
+                WHERE id=%s
+                """,
+                (
+                    merged.get("status", "queued"),
+                    json.dumps(merged.get("programs", [])),
+                    merged.get("mode", "full"),
+                    json.dumps(merged.get("progress", {})),
+                    json.dumps(merged.get("result")) if merged.get("result") is not None else None,
+                    merged.get("error"),
+                    utc_now(),
+                    job_id,
+                ),
+            )
+
+    def get_research_job(self, job_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM h1_research_jobs WHERE id=%s", (job_id,)).fetchone()
+        if not row:
+            raise KeyError(f"Research job {job_id} not found")
+        result = dict(row)
+        for key in ("programs", "progress"):
+            value = result.get(key)
+            if isinstance(value, str):
+                result[key] = json.loads(value)
+        if isinstance(result.get("result"), str):
+            result["result"] = json.loads(result["result"])
+        for key in ("created_at", "updated_at"):
+            if result.get(key) is not None and not isinstance(result[key], str):
+                result[key] = result[key].isoformat()
+        return result
