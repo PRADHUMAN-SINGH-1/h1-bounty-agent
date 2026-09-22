@@ -65,6 +65,10 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Vercel Python/ASGI entrypoints
 - Vercel daily discovery/research worker with explicit program allowlist
 - Dashboard program selection with one-click full research per program
+- Multi-surface scope routing for web, source-code, mobile, and cloud/IAM assets
+- Bounded public source-repository/static artifact analysis when the asset itself is explicitly in scope
+- Persistent background research jobs with progress tracking and evidence/check counts
+- Optional two-authorized-account differential testing configuration
 - Authenticated web review dashboard with one-click Validate & Submit
 - GitHub Actions CI
 
@@ -108,7 +112,16 @@ ALLOW_ACTIVE_TESTS=false
 ALLOW_AUTHZ_TESTS=false
 AUTHZ_HEADER_A=Authorization: Bearer <test-account-A-token>
 AUTHZ_HEADER_B=Authorization: Bearer <test-account-B-token>
-AUTHZ_MAX_ENDPOINTS=12
+AUTHZ_MAX_ENDPOINTS=30
+
+# Full research breadth
+FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM=50
+DEEP_MAX_SCRIPTS=30
+DEEP_MAX_QUERY_LINKS=20
+DEEP_MAX_API_CANDIDATES=30
+DEEP_MAX_OPENAPI_STEPS=30
+DEEP_MAX_GRAPHQL_ENDPOINTS=10
+DEEP_MAX_WEBSOCKET_ENDPOINTS=10
 SESSION_MAP_MAX_PAGES=40
 SESSION_MAP_MAX_DEPTH=2
 H1_ENABLE_SUBMISSION=true
