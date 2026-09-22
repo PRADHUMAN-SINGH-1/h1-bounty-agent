@@ -26,7 +26,7 @@ Optional HackerOne submission
 
 The project is intentionally **fail-closed**. A target must match an eligible structured scope before the research engine can send target traffic.
 
-## Current v0.5
+## Current v0.5 — deep assessment
 
 - HackerOne Hacker API client
 - Program discovery and structured-scope retrieval
