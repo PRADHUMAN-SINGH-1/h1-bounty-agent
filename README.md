@@ -111,7 +111,9 @@ AUTONOMOUS_MAX_TARGETS_PER_PROGRAM=2
 RESEARCH_PROGRAM_ALLOWLIST=<reviewed handles, comma separated>
 ```
 
-**Never commit HackerOne credentials.**
+****Blank environment values are handled safely:** numeric settings such as `REQUESTS_PER_SECOND` fall back to defaults instead of crashing a serverless function.
+
+Never commit HackerOne credentials.**
 
 Vercel cannot run your Mac's local Ollama process. For deployed LLM analysis, use the included Hugging Face adapter or another OpenAI-compatible provider. Hugging Face currently gives free users a small monthly Inference Providers credit; usage limits and pricing can change.
 
