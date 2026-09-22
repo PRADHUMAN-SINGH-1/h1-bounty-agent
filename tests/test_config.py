@@ -23,8 +23,10 @@ def test_vercel_overrides_ollama_settings(monkeypatch):
     monkeypatch.setenv("LLM_PROVIDER", "ollama")
     monkeypatch.setenv("LLM_BASE_URL", "http://127.0.0.1:11434")
     monkeypatch.setenv("LLM_MODEL", "llama3.1:8b")
-    from h1_agent.config import Settings
-    settings = Settings()
+    import importlib
+    import h1_agent.config as config
+    config = importlib.reload(config)
+    settings = config.Settings()
     assert settings.llm_provider == "vercel_gateway"
     assert settings.llm_base_url == "https://ai-gateway.vercel.sh/v1"
     assert settings.llm_model == "inclusionai/ling-3.0-flash-vl-free"
