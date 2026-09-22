@@ -35,3 +35,7 @@ def test_cli_uses_current_llm_and_active_gate():
     assert "from .llm import LLMClient" in source
     assert "settings.allow_active_tests" in source
     assert "engine.run(args.target, active=True)" in source
+
+
+def test_report_module_compiles():
+    compile((REPO / "src" / "h1_agent" / "reporting.py").read_text(encoding="utf-8"), "reporting.py", "exec")
