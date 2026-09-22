@@ -390,6 +390,7 @@ async def worker(request: Request, x_action_token: str | None = Header(default=N
 
         requested_programs: set[str] | None = None
         active = False
+        mode = ""
         try:
             body = await request.json()
             if isinstance(body, dict) and isinstance(body.get("programs"), list):
@@ -400,14 +401,17 @@ async def worker(request: Request, x_action_token: str | None = Header(default=N
                 } or None
             if isinstance(body, dict):
                 active = bool(body.get("active", False))
+                mode = str(body.get("mode", "") or "").strip().lower()
         except Exception:
             requested_programs = None
             active = False
+            mode = ""
 
         return run_cycle(
             Settings(),
             requested_programs=requested_programs,
             active=active,
+            mode=mode,
         )
     except Exception as exc:
         return {
