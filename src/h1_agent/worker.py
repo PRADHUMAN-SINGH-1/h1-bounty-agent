@@ -25,7 +25,180 @@ def _target_for_asset(asset) -> str | None:
     return None
 
 
-def run_cycle(settings: Settings) -> dict:
+def _select_targets(scopes, max_targets: int):
+    targets = []
+    for asset in scopes:
+        if not asset.eligible_for_submission or not asset.eligible_for_bounty:
+            continue
+        if asset.instruction:
+            continue
+        target = _target_for_asset(asset)
+        if target:
+            targets.append((asset, target))
+        if len(targets) >= max_targets:
+            break
+    return targets
+
+
+def _research_program(
+    settings: Settings,
+    api: HackerOneClient,
+    store: Store,
+    handle: str,
+    max_targets: int,
+    *,
+    active: bool = False,
+) -> dict:
+    result = {
+        "program": handle,
+        "targets_checked": 0,
+        "created_findings": 0,
+        "findings": [],
+        "skipped": [],
+        "status": "ok",
+    }
+
+    scopes_payload = api.structured_scopes(handle)
+    scopes = normalize_scopes(scopes_payload)
+    store.save_scopes(handle, scopes_payload)
+
+    targets = _select_targets(scopes, max_targets)
+    if not targets:
+        result["status"] = "blocked"
+        result["skipped"].append("No eligible structured-scope URL/domain assets without program-specific instructions.")
+        return result
+
+    llm = LLMClient(settings)
+    llm_available = llm.available()
+
+    for asset, target in targets:
+        existing = store.list_findings()
+        if any(
+            row.get("program_handle") == handle
+            and row.get("target") == target
+            and row.get("state") in {"needs_review", "approved", "submitted"}
+            for row in existing
+        ):
+            result["skipped"].append(f"Existing finding queue entry for {target}")
+            continue
+
+        engine = LowImpactResearch(settings, scopes)
+        try:
+            evidence_results = engine.run(target, active=active)
+        except Exception as exc:
+            result["skipped"].append(f"{target}: {exc}")
+            continue
+        finally:
+            engine.close()
+
+        result["targets_checked"] += 1
+        evidence = flatten(evidence_results)
+        evidence_json = [item.__dict__ for item in evidence]
+
+        if not llm_available:
+            result["skipped"].append(
+                f"{target}: evidence collected, but no hosted LLM is configured on Vercel"
+            )
+            continue
+
+        try:
+            draft = llm.draft_finding(handle, target, evidence_json)
+        except Exception as exc:
+            result["skipped"].append(f"{target}: LLM analysis failed: {exc}")
+            continue
+
+        if draft.get("status") != "candidate":
+            continue
+
+        try:
+            confidence = float(draft.get("confidence") or 0)
+        except (TypeError, ValueError):
+            confidence = 0
+
+        if confidence < 0.70:
+            result["skipped"].append(
+                f"{target}: LLM confidence below threshold ({confidence:.2f})"
+            )
+            continue
+
+        finding_id = store.create_finding(
+            {
+                "program_handle": handle,
+                "target": target,
+                "title": draft.get("title", ""),
+                "severity": draft.get("severity"),
+                "state": "needs_review",
+                "summary": draft.get("summary", ""),
+                "impact": draft.get("impact", ""),
+                "reproduction": draft.get("reproduction", []),
+                "evidence": evidence_json,
+                "structured_scope_id": asset.id,
+            }
+        )
+        result["created_findings"] += 1
+        result["findings"].append(
+            {
+                "id": finding_id,
+                "program": handle,
+                "target": target,
+                "title": draft.get("title", ""),
+                "severity": draft.get("severity"),
+                "confidence": confidence,
+            }
+        )
+
+    return result
+
+
+def run_program_passive_research(
+    settings: Settings,
+    handle: str,
+    max_targets: int = 2,
+) -> dict:
+    store = Store(settings)
+    api = None
+    try:
+        api = HackerOneClient(settings)
+        return _research_program(
+            settings,
+            api,
+            store,
+            handle,
+            max(1, max_targets),
+            active=False,
+        )
+    except HackerOneAPIError as exc:
+        return {
+            "program": handle,
+            "status": "blocked",
+            "error_type": "hackerone_api",
+            "error": str(exc),
+            "targets_checked": 0,
+            "created_findings": 0,
+            "findings": [],
+            "skipped": [],
+        }
+    except Exception as exc:
+        return {
+            "program": handle,
+            "status": "error",
+            "error_type": "worker",
+            "error": f"{exc.__class__.__name__}: {exc}",
+            "targets_checked": 0,
+            "created_findings": 0,
+            "findings": [],
+            "skipped": [],
+        }
+    finally:
+        if api is not None:
+            api.close()
+        store.close()
+
+
+def run_cycle(
+    settings: Settings,
+    requested_programs: set[str] | None = None,
+) -> dict:
     summary = {
         "status": "ok",
         "mode": "discovery",
@@ -56,6 +229,7 @@ def run_cycle(settings: Settings) -> dict:
             return summary
 
         ranked = []
+        program_handles = set()
 
         for item in payload.get("data", []):
             attrs = item.get("attributes", {})
@@ -88,9 +262,66 @@ def run_cycle(settings: Settings) -> dict:
                 scopes,
             )
             ranked.append((opportunity, scopes))
+            program_handles.add(handle)
 
         ranked.sort(key=lambda pair: (-pair[0].score, pair[0].handle))
         summary["checked_programs"] = len(ranked)
+
+        if requested_programs:
+            selected = [
+                handle
+                for handle in requested_programs
+                if handle in program_handles
+            ]
+            if not selected:
+                summary["status"] = "blocked"
+                summary["mode"] = "selected-programs"
+                summary["error"] = "None of the requested program handles were returned by HackerOne."
+                return summary
+
+            summary["mode"] = "selected-program-passive-research"
+            per_program = []
+            for handle in selected:
+                result = _research_program(
+                    settings,
+                    api,
+                    store,
+                    handle,
+                    settings.autonomous_max_targets_per_program,
+                    active=False,
+                )
+                per_program.append(result)
+                summary["researched_targets"] += result.get("targets_checked", 0)
+                summary["created_findings"] += result.get("created_findings", 0)
+                summary["findings"].extend(result.get("findings", []))
+                summary["skipped"].extend(
+                    [{"program": handle, "reason": reason} for reason in result.get("skipped", [])]
+                )
+
+            summary["program_results"] = per_program
+            return summary
+
+        if settings.autonomous_passive_research:
+            allowlist = set(settings.research_program_allowlist)
+            summary["mode"] = "autonomous-passive-research"
+            for opportunity, _scopes in ranked[: settings.autonomous_max_programs]:
+                if opportunity.handle not in allowlist:
+                    continue
+                result = _research_program(
+                    settings,
+                    api,
+                    store,
+                    opportunity.handle,
+                    settings.autonomous_max_targets_per_program,
+                    active=False,
+                )
+                summary["researched_targets"] += result.get("targets_checked", 0)
+                summary["created_findings"] += result.get("created_findings", 0)
+                summary["findings"].extend(result.get("findings", []))
+                summary["skipped"].extend(
+                    [{"program": opportunity.handle, "reason": reason} for reason in result.get("skipped", [])]
+                )
+            return summary
 
         if not settings.autonomous_research:
             summary["top_opportunities"] = [
@@ -109,23 +340,14 @@ def run_cycle(settings: Settings) -> dict:
             summary["error_type"] = "llm"
             return summary
 
-        research_ranked = ranked[: settings.autonomous_max_programs]
-
-        for opportunity, scopes in research_ranked:
+        for opportunity, scopes in ranked[: settings.autonomous_max_programs]:
             if opportunity.handle not in allowlist:
                 continue
 
-            targets = []
-            for asset in scopes:
-                if not asset.eligible_for_submission or not asset.eligible_for_bounty:
-                    continue
-                if asset.instruction:
-                    continue
-                target = _target_for_asset(asset)
-                if target:
-                    targets.append((asset, target))
-                if len(targets) >= settings.autonomous_max_targets_per_program:
-                    break
+            targets = _select_targets(
+                scopes,
+                settings.autonomous_max_targets_per_program,
+            )
 
             for asset, target in targets:
                 existing = store.list_findings()
@@ -139,14 +361,10 @@ def run_cycle(settings: Settings) -> dict:
 
                 engine = LowImpactResearch(settings, scopes)
                 try:
-                    results = engine.run(target)
+                    results = engine.run(target, active=True)
                 except Exception as exc:
                     summary["skipped"].append(
-                        {
-                            "program": opportunity.handle,
-                            "target": target,
-                            "reason": str(exc),
-                        }
+                        {"program": opportunity.handle, "target": target, "reason": str(exc)}
                     )
                     continue
                 finally:
@@ -204,7 +422,6 @@ def run_cycle(settings: Settings) -> dict:
                         "structured_scope_id": asset.id,
                     }
                 )
-
                 summary["created_findings"] += 1
                 summary["findings"].append(
                     {
@@ -217,7 +434,7 @@ def run_cycle(settings: Settings) -> dict:
                     }
                 )
 
-        summary["mode"] = "autonomous-authorized-research"
+        summary["mode"] = "autonomous-authorized-active-research"
         return summary
 
     except Exception as exc:
