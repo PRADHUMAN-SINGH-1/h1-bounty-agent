@@ -448,9 +448,12 @@ def run_cycle(
                         api,
                         store,
                         handle,
-                        settings.autonomous_max_targets_per_program,
+                        settings.full_research_max_targets_per_program
+                        if selected_deep
+                        else settings.autonomous_max_targets_per_program,
                         active=selected_active,
                         deep=selected_deep,
+                        on_progress=on_progress,
                     )
                 except HackerOneAPIError as exc:
                     result = {
