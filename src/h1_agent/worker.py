@@ -619,6 +619,14 @@ def run_cycle(
                         )
 
                     store.save_program(program_payload)
+                    try:
+                        exclusions_payload = api.scope_exclusions(handle)
+                    except Exception as exc:
+                        exclusions_payload = {"error": str(exc)}
+                    try:
+                        weaknesses_payload = api.weaknesses(handle)
+                    except Exception as exc:
+                        weaknesses_payload = {"error": str(exc)}
                     result = _research_program(
                         settings,
                         api,
@@ -635,6 +643,8 @@ def run_cycle(
                             "name": attrs.get("name") or handle,
                             "state": attrs.get("state") or "",
                             "policy": attrs.get("policy") or attrs.get("description") or "",
+                            "scope_exclusions": exclusions_payload,
+                            "weaknesses": weaknesses_payload,
                             "toolchain_enabled": settings.toolchain_enabled,
                             "toolchain_max_roots": settings.toolchain_max_roots,
                         },
