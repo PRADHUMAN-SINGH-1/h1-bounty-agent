@@ -6,6 +6,14 @@ from urllib.parse import urljoin
 
 import httpx
 
+from .authorization import AuthorizationDifferentialTester, evidence_from_results
+from .attack_surface import (
+    discover_from_html,
+    discover_from_javascript,
+    discover_from_openapi,
+    parse_openapi,
+    surface_evidence,
+)
 from .config import Settings
 from .models import Evidence, ScopeAsset
 from .scope import require_in_scope
@@ -156,6 +164,32 @@ class LowImpactResearch:
         links, scripts, _forms = discover_page(html, base)
         query_links = interesting_query_links(links, base)
 
+        surface = discover_from_html(html, base)
+        script_texts: list[tuple[str, str]] = []
+        for script_url in scripts[:10]:
+            try:
+                response = self._get(script_url, follow_redirects=False)
+                content_type = response.headers.get("content-type", "")
+                if response.status_code == 200 and ("javascript" in content_type or "text" in content_type or script_url.endswith(".js")):
+                    script_texts.append((script_url, response.text))
+                    surface.extend(discover_from_javascript(response.text, script_url, base))
+            except httpx.HTTPError:
+                continue
+
+        unique_surface = []
+        seen_surface = set()
+        for endpoint in surface:
+            if endpoint.url in seen_surface:
+                continue
+            seen_surface.add(endpoint.url)
+            unique_surface.append(endpoint)
+        checks.append(CheckResult(
+            "attack_surface_inventory",
+            "found" if unique_surface else "empty",
+            f"{len(unique_surface)} same-origin endpoints discovered",
+            surface_evidence(unique_surface),
+        ))
+
         status, evidence = cors_probe(self.client, base, self._get)
         checks.append(CheckResult("cors_probe", status, status.replace("_", " "), evidence))
 
@@ -174,6 +208,58 @@ class LowImpactResearch:
 
         status, evidence = api_spec_probe(base, self._get)
         checks.append(CheckResult("api_spec_probe", status, status.replace("_", " "), evidence))
+
+        openapi_endpoints = []
+        for path in ("openapi.json", "swagger.json", "api-docs", "v3/api-docs"):
+            spec_url = urljoin(base, path)
+            try:
+                response = self._get(spec_url, follow_redirects=False)
+                if response.status_code == 200:
+                    document = parse_openapi(response.text)
+                    if document:
+                        openapi_endpoints.extend(discover_from_openapi(document, base))
+            except httpx.HTTPError:
+                continue
+
+        if openapi_endpoints:
+            seen_openapi = set()
+            deduped_openapi = []
+            for endpoint in openapi_endpoints:
+                if endpoint.url in seen_openapi:
+                    continue
+                seen_openapi.add(endpoint.url)
+                deduped_openapi.append(endpoint)
+            checks.append(CheckResult(
+                "openapi_surface",
+                "found",
+                f"{len(deduped_openapi)} read-only API operations discovered",
+                surface_evidence(deduped_openapi),
+            ))
+
+        if self.settings.allow_authz_tests and self.settings.authz_header_a and self.settings.authz_header_b:
+            authz_urls = [endpoint.url for endpoint in unique_surface if "/api/" in endpoint.url.lower() or "graphql" in endpoint.url.lower()]
+            authz_urls.extend(endpoint.url for endpoint in openapi_endpoints[:20])
+            try:
+                tester = AuthorizationDifferentialTester(
+                    self.client,
+                    self.settings.authz_header_a,
+                    self.settings.authz_header_b,
+                    self.settings.authz_max_endpoints,
+                )
+                differential = tester.compare(authz_urls)
+                checks.append(CheckResult(
+                    "authorization_differential",
+                    "review" if any(item.suspicious for item in differential) else "observed",
+                    "Two-account read-only authorization differential",
+                    evidence_from_results(differential),
+                ))
+            except ValueError as exc:
+                checks.append(CheckResult(
+                    "authorization_differential",
+                    "error",
+                    str(exc),
+                    [Evidence("authorization_config_error", str(exc), base)],
+                ))
 
         status, evidence = mixed_content_probe(base, html)
         checks.append(CheckResult("mixed_content_probe", status, status.replace("_", " "), evidence))
