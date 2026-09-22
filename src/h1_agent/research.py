@@ -50,10 +50,12 @@ class LowImpactResearch:
         self._wait()
         return self.client.options(url)
 
-    def run(self, target: str) -> list[CheckResult]:
+    def run(self, target: str, *, active: bool = False) -> list[CheckResult]:
         asset = require_in_scope(target, self.scopes)
-        if not self.settings.allow_active_tests:
-            raise PermissionError("Active testing is disabled. Set ALLOW_ACTIVE_TESTS=true after reviewing program policy.")
+        if active and not self.settings.allow_active_tests:
+            raise PermissionError(
+                "Active testing is disabled. Set ALLOW_ACTIVE_TESTS=true only after reviewing program policy."
+            )
         if asset.instruction:
             print_instruction = asset.instruction.strip().replace("\n", " ")
             raise PermissionError(
