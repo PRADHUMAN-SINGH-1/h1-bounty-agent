@@ -105,6 +105,8 @@ class Settings:
     deep_max_cloud_text_bytes: int = max(_int("DEEP_MAX_CLOUD_TEXT_BYTES", 4_000_000), 100_000)
     deep_max_pages: int = max(_int("DEEP_MAX_PAGES", 30), 1)
     deep_max_page_links: int = max(_int("DEEP_MAX_PAGE_LINKS", 80), 10)
+    toolchain_enabled: bool = _bool("TOOLCHAIN_ENABLED", True)
+    toolchain_max_roots: int = max(_int("TOOLCHAIN_MAX_ROOTS", 10), 1)
     research_program_allowlist: tuple[str, ...] = _csv("RESEARCH_PROGRAM_ALLOWLIST")
 
     blob_token: str = _raw("BLOB_READ_WRITE_TOKEN")
