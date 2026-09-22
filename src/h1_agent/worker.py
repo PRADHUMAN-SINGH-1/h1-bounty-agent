@@ -52,6 +52,7 @@ def run_cycle(settings: Settings) -> dict:
             summary["status"] = "blocked"
             summary["error"] = str(exc)
             summary["error_type"] = "configuration"
+            summary["next_action"] = "Set the missing HackerOne environment variable in Vercel Production, then redeploy."
             return summary
 
         ranked = []
