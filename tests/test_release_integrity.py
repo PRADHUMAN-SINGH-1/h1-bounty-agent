@@ -16,8 +16,11 @@ def test_dashboard_uses_event_binding_for_all_buttons():
     assert "onclick=" not in html
     for action in ("connectBtn", "run", "refreshBtn", "logoutBtn", "scanBtn"):
         assert f'id="{action}"' in html
-    for action in ("data-view-id", "data-approve-id", "data-submit-id", "data-full-research-handle"):
+    for action in ("data-view-id", "data-approve-id", "data-full-research-handle"):
         assert action in html
+    assert "data-submit-id" not in html
+    assert "async function submitFinding" not in html
+    assert "Approve & Submit" in html
     assert "data-research-handle" not in html
     assert "data-assess-handle" not in html
     assert "async function assessProgram" not in html
