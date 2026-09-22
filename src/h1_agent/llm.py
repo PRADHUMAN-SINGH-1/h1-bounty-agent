@@ -158,16 +158,23 @@ Rules:
 - Return at most 8 leads, ordered by evidentiary strength.
 - Evidence indices are zero-based and must point to supplied evidence items.
 
-PROGRAM_CONTEXT={json.dumps(program_context, indent=2)[:16000]}
+PROGRAM_CONTEXT={json.dumps(program_context or {}, indent=2)[:16000]}
 PROGRAM={program_handle}
 TARGET={target}
-PROGRAM_CONTEXT={json.dumps(program_context if 'program_context' in locals() else {}, indent=2)[:16000]}
+PROGRAM_CONTEXT={json.dumps(program_context, indent=2)[:16000]}
 LEADS={json.dumps(leads or [], indent=2)}
 EVIDENCE={json.dumps(evidence, indent=2)}
 """
         return self.json(prompt)
 
-    def draft_finding(self, program_handle: str, target: str, evidence: list[dict], leads: list[dict] | None = None) -> dict:
+    def draft_finding(
+        self,
+        program_handle: str,
+        target: str,
+        evidence: list[dict],
+        leads: list[dict] | None = None,
+        program_context: dict | None = None,
+    ) -> dict:
         prompt = f"""
 You are an evidence-grounded assistant in an authorized bug bounty workflow.
 
