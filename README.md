@@ -149,6 +149,32 @@ Never commit HackerOne credentials.**
 
 Vercel cannot run your Mac's local Ollama process. The production configuration now prefers Vercel AI Gateway with Vercel OIDC; Vercel documents OIDC authentication for AI Gateway, and its catalog includes free models. citeturn107218search3turn408691search1
 
+## Render deployment
+
+Vercel is not required for production hosting. This repository includes a Render Blueprint with a FastAPI web service, a scheduled research cron job, and Render Postgres for durable findings/research memory.
+
+The Render web service runs:
+
+```text
+uvicorn api.index:app --host 0.0.0.0 --port $PORT
+```
+
+Render Web Services deploy from a connected Git repository and expose an `onrender.com` URL. Render Cron Jobs run scheduled commands separately, and Render Postgres provides managed persistent database storage. citeturn337425search3turn337425search1turn337425search2
+
+To deploy:
+
+1. Open Render and choose **New → Blueprint**.
+2. Connect `PRADHUMAN-SINGH-1/h1-bounty-agent`.
+3. Render reads `render.yaml` and provisions the web service, cron job, and Postgres database.
+4. Enter the prompted secrets: HackerOne API credentials, dashboard username/password, and your LLM provider credentials.
+5. Open the generated `onrender.com` URL and use the existing H1 dashboard.
+
+The cron job is configured for daily discovery at 03:00 UTC. Render cron schedules use UTC and run independently from the web service. citeturn337425search1
+
+The application uses Postgres whenever `DATABASE_URL` is present, while local development without `DATABASE_URL` continues to use the JSON store. Render Blueprint `fromDatabase` wiring injects the database connection string without committing credentials to the repository. citeturn360941search0turn360941search4
+
+`LLM_PROVIDER` must use a provider reachable from Render. The previous Vercel AI Gateway setting is not required for this deployment.
+
 ## Local workflow
 
 ```bash
