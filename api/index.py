@@ -259,6 +259,7 @@ def submit_finding(
         evidence=[Evidence(**item) for item in row["evidence"]],
         structured_scope_id=row.get("structured_scope_id"),
         weakness_id=row.get("weakness_id"),
+        metadata=row.get("metadata") or {},
     )
 
     settings = Settings()
