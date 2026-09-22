@@ -60,10 +60,12 @@ def analyze_mobile_package(path: str) -> tuple[dict, list[Evidence]]:
                     pass
 
         evidence.extend(
-            Evidence("mobile_file_count", str(len(names)), str(file_path)),
-            Evidence("mobile_dex_count", str(len(result["dex_files"])), str(file_path)),
-            Evidence("mobile_native_count", str(len(result["native_libraries"])), str(file_path)),
-            Evidence("mobile_security_flags", json.dumps(result["security_flags"]), str(file_path)),
-            Evidence("mobile_url_reference_count", str(len(urls)), str(file_path)),
+            [
+                Evidence("mobile_file_count", str(len(names)), str(file_path)),
+                Evidence("mobile_dex_count", str(len(result["dex_files"])), str(file_path)),
+                Evidence("mobile_native_count", str(len(result["native_libraries"])), str(file_path)),
+                Evidence("mobile_security_flags", json.dumps(result["security_flags"]), str(file_path)),
+                Evidence("mobile_url_reference_count", str(len(urls)), str(file_path)),
+            ]
         )
         return result, evidence
