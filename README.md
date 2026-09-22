@@ -26,19 +26,22 @@ Optional HackerOne submission
 
 The project is intentionally **fail-closed**. A target must match an eligible structured scope before the research engine can send target traffic.
 
-## Current v0.3
+## Current v0.4
 
 - HackerOne Hacker API client
 - Program discovery and structured-scope retrieval
 - URL/domain/wildcard scope validation
 - Local SQLite workspace for local runs
+- Private Vercel Blob persistence for deployed findings
 - Local Ollama LLM integration
+- Hosted Hugging Face OpenAI-compatible LLM adapter
 - Low-impact HTTP evidence collection
 - Evidence-grounded finding drafting
 - Human review and approval gate
 - Explicit submission gate
 - Vercel Python/ASGI entrypoints
-- Vercel daily discovery cron
+- Vercel daily discovery/research worker with explicit program allowlist
+- Authenticated web review dashboard with one-click Validate & Submit
 - GitHub Actions CI
 
 ## Vercel deployment
@@ -56,7 +59,7 @@ After Vercel rebuilds from the latest `main` commit:
 - `/api/programs` checks the HackerOne API.
 - `/api/cron` performs the scheduled program/scope triage.
 
-The cron worker is currently **discovery-only**. It does not autonomously attack targets or submit reports. That is intentional while the research and durable-state layers are being hardened.
+The cron worker now supports two modes. Discovery runs automatically. Authorized low-impact research is opt-in through `AUTONOMOUS_RESEARCH=true`, `ALLOW_ACTIVE_TESTS=true`, and an explicit `RESEARCH_PROGRAM_ALLOWLIST`; it never submits reports automatically.
 
 Current Vercel scheduling depends on the plan: Hobby currently provides daily Cron execution with per-hour precision, while Pro/Enterprise support more frequent scheduling.
 
@@ -76,15 +79,35 @@ H1_ENABLE_SUBMISSION=false
 # Optional cron protection
 CRON_SECRET=<random secret>
 
-# Local-only LLM settings
+# Durable deployed storage
+BLOB_READ_WRITE_TOKEN=<private Vercel Blob credential>
+
+# Dashboard authentication
+DASHBOARD_USER=<username>
+DASHBOARD_PASSWORD=<strong password>
+DASHBOARD_SECRET=<random secret>
+CRON_SECRET=<random secret>
+
+# Hosted LLM for Vercel
+LLM_PROVIDER=huggingface
+HF_TOKEN=<Hugging Face token>
+LLM_MODEL=openai/gpt-oss-120b:groq
+
+# Local-only alternative
 LLM_PROVIDER=ollama
 LLM_BASE_URL=http://127.0.0.1:11434
 LLM_MODEL=llama3.1:8b
+
+# Autonomous research gates
+AUTONOMOUS_RESEARCH=false
+AUTONOMOUS_MAX_PROGRAMS=3
+AUTONOMOUS_MAX_TARGETS_PER_PROGRAM=2
+RESEARCH_PROGRAM_ALLOWLIST=<reviewed handles, comma separated>
 ```
 
 **Never commit HackerOne credentials.**
 
-The current GitHub/Vercel architecture does not require a paid LLM for local development, but Vercel itself cannot run your Mac's local Ollama process. A hosted LLM or separate compute layer will be needed before the deployed agent can perform LLM-based research automatically.
+Vercel cannot run your Mac's local Ollama process. For deployed LLM analysis, use the included Hugging Face adapter or another OpenAI-compatible provider. Hugging Face currently gives free users a small monthly Inference Providers credit; usage limits and pricing can change.
 
 ## Local workflow
 
@@ -169,9 +192,7 @@ This project does **not** guarantee bounty income. A finding must be real, repro
 5. Submission gate ✅
 6. Vercel health/API endpoints ✅
 7. Vercel scheduled discovery ✅
-8. Durable cloud finding storage
-9. Authorization-aware research plugins
-10. Duplicate/history correlation
-11. Earnings/report-state synchronization
-12. Hosted LLM worker
-13. Background research scheduler
+8. Duplicate/history correlation
+9. Earnings/report-state synchronization
+10. More authorization-aware research plugins
+11. Deeper evidence correlation and report quality scoring
