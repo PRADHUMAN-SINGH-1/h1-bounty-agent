@@ -10,9 +10,13 @@ from .llm import LLMClient
 from .research import LowImpactResearch, flatten
 from .scope import normalize_scopes
 from .store import Store
-from .models import Evidence
+from .models import Evidence, Finding
 from .asset_intelligence import analyze_asset
 from .toolchain import run_deep_toolchain
+from .pattern_library import relevant_patterns
+from .reporting import markdown_report
+from .scope import target_is_in_scope
+from .validation import validate_finding
 from .recon_diff import compare_surfaces
 from .research_memory import make_memory
 
@@ -91,6 +95,71 @@ def _select_targets(scopes, max_targets: int, *, exhaustive: bool = False):
         for asset in _select_research_assets(scopes, max_targets, exhaustive=exhaustive)
         if (target := _target_for_asset(asset))
     ]
+
+
+def _maybe_auto_submit(
+    settings: Settings,
+    api: HackerOneClient,
+    store: Store,
+    finding_id: int,
+    handle: str,
+    target: str,
+    title: str,
+    severity: str | None,
+    confidence: float,
+    summary: str,
+    impact: str,
+    reproduction: list,
+    evidence_json: list[dict],
+    asset,
+    scopes,
+    metadata: dict,
+) -> dict | None:
+    if not settings.auto_submit_findings:
+        return None
+    if not settings.enable_submission or not settings.hackerone_api_token:
+        return {"status": "blocked", "reason": "automatic submission gate is not fully enabled"}
+    if settings.dry_run:
+        return {"status": "blocked", "reason": "DRY_RUN is enabled"}
+    if severity not in {"high", "critical"}:
+        return {"status": "blocked", "reason": "automatic submission requires high/critical severity"}
+    if confidence < 0.90:
+        return {"status": "blocked", "reason": f"confidence {confidence:.2f} is below the 0.90 automatic-submission threshold"}
+    if not reproduction or len(evidence_json) < 10:
+        return {"status": "blocked", "reason": "insufficient reproduction/evidence"}
+    if metadata.get("missing_validation"):
+        return {"status": "blocked", "reason": "finding still requires validation"}
+    ok, scoped_asset, reason = target_is_in_scope(target, scopes)
+    if not ok or scoped_asset is None or not scoped_asset.eligible_for_submission:
+        return {"status": "blocked", "reason": f"scope validation failed: {reason}"}
+    finding = Finding(
+        program_handle=handle,
+        target=target,
+        title=title,
+        severity=severity,
+        state="approved",
+        summary=summary,
+        impact=impact,
+        reproduction=reproduction,
+        evidence=[Evidence(**item) for item in evidence_json],
+        structured_scope_id=asset.id,
+        weakness_id=metadata.get("weakness_id"),
+        metadata=metadata,
+    )
+    validation = validate_finding(finding)
+    if not validation.ok:
+        return {"status": "blocked", "reason": "; ".join(validation.blockers)}
+    payload = api.create_report(
+        team_handle=handle,
+        title=title,
+        vulnerability_information=markdown_report(finding),
+        impact=impact,
+        severity_rating=severity,
+        weakness_id=metadata.get("weakness_id"),
+        structured_scope_id=int(asset.id) if str(asset.id).isdigit() else None,
+    )
+    store.mark_submitted(finding_id, payload)
+    return {"status": "submitted", "report_id": str(payload.get("data", {}).get("id") or "")}
 
 
 def _research_program(
@@ -270,12 +339,14 @@ def _research_program(
                 break
         evidence.extend(relevant_tool_evidence)
         evidence_json = [item.__dict__ for item in evidence]
+        matched_patterns = relevant_patterns(evidence, limit=12)
         result["research_trace"] = {
             "checks": [item.name for item in evidence_results],
             "evidence_count": len(evidence_json),
             "deep": deep,
             "active": active,
             "asset_type": asset.asset_type,
+            "matched_patterns": [item.name for item in matched_patterns],
         }
 
         if on_progress:
@@ -298,7 +369,20 @@ def _research_program(
             triage = llm.triage_evidence(
                 handle,
                 target,
-                program_context or {},
+                {
+                    **(program_context or {}),
+                    "matched_patterns": [
+                        {
+                            "name": item.name,
+                            "classes": item.classes,
+                            "prerequisites": item.prerequisites,
+                            "strong_signals": item.strong_signals,
+                            "false_positive_traps": item.false_positive_traps,
+                            "impact": item.impact,
+                        }
+                        for item in matched_patterns
+                    ],
+                },
                 evidence_json,
             )
             leads = triage.get("leads") if isinstance(triage.get("leads"), list) else []
@@ -313,7 +397,20 @@ def _research_program(
                 target,
                 evidence_json,
                 leads=leads,
-                program_context=program_context or {},
+                program_context={
+                    **(program_context or {}),
+                    "matched_patterns": [
+                        {
+                            "name": item.name,
+                            "classes": item.classes,
+                            "prerequisites": item.prerequisites,
+                            "strong_signals": item.strong_signals,
+                            "false_positive_traps": item.false_positive_traps,
+                            "impact": item.impact,
+                        }
+                        for item in matched_patterns
+                    ],
+                },
             )
         except Exception as exc:
             result["skipped"].append(f"{target}: LLM analysis failed: {exc}")
@@ -384,6 +481,32 @@ def _research_program(
                 "confidence": confidence,
             }
         )
+
+        if settings.auto_submit_findings:
+            try:
+                auto_result = _maybe_auto_submit(
+                    settings,
+                    api,
+                    store,
+                    finding_id,
+                    handle,
+                    target,
+                    draft.get("title", ""),
+                    draft.get("severity"),
+                    confidence,
+                    draft.get("summary", ""),
+                    draft.get("impact", ""),
+                    draft.get("reproduction", []),
+                    evidence_json,
+                    asset,
+                    scopes,
+                    metadata,
+                )
+                result["findings"][-1]["auto_submission"] = auto_result
+            except HackerOneAPIError as exc:
+                result["skipped"].append(f"{target}: automatic submission failed: {exc}")
+            except Exception as exc:
+                result["skipped"].append(f"{target}: automatic submission blocked: {exc}")
 
     return result
 
@@ -496,6 +619,14 @@ def run_cycle(
                         )
 
                     store.save_program(program_payload)
+                    try:
+                        exclusions_payload = api.scope_exclusions(handle)
+                    except Exception as exc:
+                        exclusions_payload = {"error": str(exc)}
+                    try:
+                        weaknesses_payload = api.weaknesses(handle)
+                    except Exception as exc:
+                        weaknesses_payload = {"error": str(exc)}
                     result = _research_program(
                         settings,
                         api,
@@ -512,6 +643,8 @@ def run_cycle(
                             "name": attrs.get("name") or handle,
                             "state": attrs.get("state") or "",
                             "policy": attrs.get("policy") or attrs.get("description") or "",
+                            "scope_exclusions": exclusions_payload,
+                            "weaknesses": weaknesses_payload,
                             "toolchain_enabled": settings.toolchain_enabled,
                             "toolchain_max_roots": settings.toolchain_max_roots,
                         },
