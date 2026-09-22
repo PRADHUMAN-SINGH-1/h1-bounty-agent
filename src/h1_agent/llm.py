@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import httpx
 
@@ -16,8 +17,13 @@ class LLMClient:
         self.base_url = settings.llm_base_url.rstrip("/")
         self.model = settings.llm_model
 
+    def _gateway_token(self) -> str:
+        return self.settings.llm_api_key or os.getenv("VERCEL_OIDC_TOKEN", "")
+
     def available(self) -> bool:
-        if self.provider == "ollama":
+        if self.provider in {"vercel_gateway", "ai_gateway"}:
+            return bool(self._gateway_token())
+        if self.provider == "ollama":        if self.provider == "ollama":
             try:
                 return httpx.get(f"{self.base_url}/api/tags", timeout=3).is_success
             except httpx.HTTPError:
@@ -29,6 +35,32 @@ class LLMClient:
         return False
 
     def generate(self, prompt: str) -> str:
+        if self.provider in {"vercel_gateway", "ai_gateway"}:
+            token = self._gateway_token()
+            if not token:
+                raise RuntimeError(
+                    "Vercel AI Gateway authentication is unavailable. Enable Vercel OIDC for the project or set AI_GATEWAY_API_KEY."
+                )
+            response = httpx.post(
+                self.base_url.rstrip("/") + "/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.05,
+                    "max_tokens": 1600,
+                    "stream": False,
+                },
+                timeout=180,
+            )
+            response.raise_for_status()
+            data = response.json()
+            return str(data["choices"][0]["message"]["content"])
+
+        if self.provider == "ollama":
         if self.provider == "ollama":
             response = httpx.post(
                 f"{self.base_url}/api/generate",
