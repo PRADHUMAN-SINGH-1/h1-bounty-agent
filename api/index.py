@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,12 @@ def _read_state() -> dict[str, Any]:
 
 def _write_state(state: dict[str, Any]) -> None:
     _STATE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+
+def _normalize_credential(value: str) -> str:
+    value = unicodedata.normalize("NFKC", value)
+    value = value.replace("\\r", "").replace("\\n", "")
+    return value.strip()
 
 
 def _sign(value: str) -> str:
@@ -96,10 +103,10 @@ async def login(request: Request) -> JSONResponse:
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON.") from exc
 
-    username = str(body.get("username", ""))
-    password = str(body.get("password", ""))
-    expected_user = os.getenv("DASHBOARD_USER", "")
-    expected_password = os.getenv("DASHBOARD_PASSWORD", "")
+    username = _normalize_credential(str(body.get("username", "")))
+    password = _normalize_credential(str(body.get("password", "")))
+    expected_user = _normalize_credential(os.getenv("DASHBOARD_USER", ""))
+    expected_password = _normalize_credential(os.getenv("DASHBOARD_PASSWORD", ""))
 
     if not expected_user or not expected_password:
         raise HTTPException(status_code=503, detail="Dashboard credentials are not configured.")
