@@ -2,22 +2,20 @@
 
 AI-assisted HackerOne research workspace designed to automate the repetitive parts of authorized bug-bounty research while keeping the required human validation gate.
 
-## What it does
+## Architecture
 
 ```text
 HackerOne API
      ↓
-Program discovery + scope cache
+Program discovery
      ↓
-Opportunity triage
+Scope / policy gate
      ↓
-Scope gate
+Research checks
      ↓
-Low-impact research checks
+Evidence
      ↓
-Evidence collection
-     ↓
-Local LLM analysis / report draft
+LLM analysis
      ↓
 Human validation
      ↓
@@ -28,25 +26,67 @@ Optional HackerOne submission
 
 The project is intentionally **fail-closed**. A target must match an eligible structured scope before the research engine can send target traffic.
 
-## Current v0.2
+## Current v0.3
 
 - HackerOne Hacker API client
-- Program discovery and scope retrieval
-- URL/domain/wildcard scope validation with URL-path awareness
-- Local SQLite research workspace
+- Program discovery and structured-scope retrieval
+- URL/domain/wildcard scope validation
+- Local SQLite workspace for local runs
 - Local Ollama LLM integration
 - Low-impact HTTP evidence collection
 - Evidence-grounded finding drafting
-- Human review checklist
-- Explicit approval state
-- Submission flag + `--confirmed` gate
+- Human review and approval gate
+- Explicit submission gate
+- Vercel Python/ASGI entrypoints
+- Vercel daily discovery cron
 - GitHub Actions CI
 
-## Zero-cash start
+## Vercel deployment
 
-The initial architecture can run using your existing machine and a local Ollama model, avoiding per-request LLM charges. You may later add paid compute/models only after the system has demonstrated useful results. This does **not** guarantee bounty income.
+The repository now includes:
 
-## Setup
+- `api/index.py` → health endpoint
+- `api/programs.py` → authenticated HackerOne program endpoint
+- `api/cron.py` → scheduled program/scope triage worker
+- `vercel.json` → Vercel Function + Cron configuration
+
+After Vercel rebuilds from the latest `main` commit:
+
+- `/api` returns service health.
+- `/api/programs` checks the HackerOne API.
+- `/api/cron` performs the scheduled program/scope triage.
+
+The cron worker is currently **discovery-only**. It does not autonomously attack targets or submit reports. That is intentional while the research and durable-state layers are being hardened.
+
+Vercel Cron can invoke Functions automatically. On Vercel Hobby, current documentation describes Cron as once per day with per-hour precision; Pro/Enterprise provide more frequent scheduling. citeturn991511search1turn991511search0
+
+## Environment variables
+
+Configure these in the Vercel project environment settings rather than GitHub:
+
+```text
+HACKERONE_USERNAME=<API token identifier>
+HACKERONE_API_TOKEN=<API token value>
+HACKERONE_BASE_URL=https://api.hackerone.com
+
+DRY_RUN=true
+ALLOW_ACTIVE_TESTS=false
+H1_ENABLE_SUBMISSION=false
+
+# Optional cron protection
+CRON_SECRET=<random secret>
+
+# Local-only LLM settings
+LLM_PROVIDER=ollama
+LLM_BASE_URL=http://127.0.0.1:11434
+LLM_MODEL=llama3.1:8b
+```
+
+**Never commit HackerOne credentials.**
+
+The current GitHub/Vercel architecture does not require a paid LLM for local development, but Vercel itself cannot run your Mac's local Ollama process. A hosted LLM or separate compute layer will be needed before the deployed agent can perform LLM-based research automatically.
+
+## Local workflow
 
 ```bash
 python3 -m venv .venv
@@ -55,41 +95,31 @@ pip install -e '.[test]'
 cp .env.example .env
 ```
 
-Put your HackerOne API credentials in `.env`. Never commit the file or token.
-
-## Workflow
-
-### 1. Discover programs
+Discover programs:
 
 ```bash
 h1-agent discover --limit 15
 ```
 
-This only queries HackerOne. It does not touch target systems.
-
-### 2. Inspect a program
+Inspect a program:
 
 ```bash
 h1-agent program <handle>
 ```
 
-### 3. Generate a research plan
+Generate an AI plan locally with Ollama:
 
 ```bash
 h1-agent plan <handle>
 ```
 
-Requires local Ollama.
-
-### 4. Check a target without sending traffic
+Check a target without sending target traffic:
 
 ```bash
 h1-agent dry-run <handle> https://target.example/
 ```
 
-### 5. Run low-impact research
-
-Only after reviewing the current program policy and confirming that this activity is permitted:
+Run the low-impact research engine only after reviewing the program policy and enabling the local gate:
 
 ```text
 ALLOW_ACTIVE_TESTS=true
@@ -101,54 +131,34 @@ Then:
 h1-agent research <handle> https://target.example/ --active
 ```
 
-The first research engine only performs low-impact HTTP metadata collection: the target URL, `robots.txt`, `security.txt`, `sitemap.xml`, and an OPTIONS metadata request. Program-specific asset instructions trigger a manual review rather than being guessed by the software.
-
-### 6. Review candidate findings
+Review:
 
 ```bash
 h1-agent findings
 h1-agent review <finding-id>
 ```
 
-### 7. Validate and approve yourself
-
-Only after personally reproducing the behavior and checking scope, policy, evidence, impact, and duplicate/exclusion rules:
+Approve only after personally validating the finding:
 
 ```bash
 h1-agent approve <finding-id>
 ```
 
-### 8. Submit only after approval
+Submission remains separately disabled until explicitly enabled.
 
-Keep this disabled until you are ready:
+## Human validation
 
-```text
-H1_ENABLE_SUBMISSION=true
-```
+**AI / automation:** program discovery, scope loading, research planning, low-impact evidence collection, evidence-grounded draft generation, report formatting.
 
-Then:
+**You:** review current program rules, reproduce the behavior, confirm scope, verify impact/evidence, check duplicates/exclusions, confirm severity, and approve the report.
 
-```bash
-h1-agent submit <finding-id> --team-handle <handle> --severity <level> --confirmed
-```
+HackerOne currently requires a human-in-the-loop for AI-assisted Hackbot activity and states that the researcher remains responsible for the submissions. citeturn939728search0
 
-The application refuses submission unless the finding is approved.
+## Zero-cash starting point
 
-## What the AI does vs. what you do
+The initial system is designed to avoid per-request LLM costs during local development by using a local model. The deployed Vercel worker can run scheduled HackerOne discovery without an LLM, but the full AI research layer requires hosted inference or another compute environment.
 
-**AI / automation:** program discovery, scope loading, research planning, low-impact evidence collection, evidence-grounded draft generation, local history, report formatting.
-
-**You:** review program rules, reproduce and validate a potential vulnerability, verify impact/evidence, check duplicates/exclusions, choose/confirm severity, and explicitly approve submission.
-
-That split is deliberate. HackerOne currently requires a human-in-the-loop for Hackbots and says AI-assisted submissions remain the researcher’s responsibility. It also prohibits unverified/fabricated findings and unsafe or out-of-scope testing.
-
-## Safety boundary
-
-The agent does not provide an unrestricted internet scanner or blind autonomous exploitation. It must operate only against authorized scope, respect program-specific limits, avoid unsafe testing, and keep submission behind human approval.
-
-## Income expectations
-
-A bounty is not earned merely because the agent runs. A result must be real, reproducible, in scope, eligible, sufficiently demonstrated, and accepted by the program. Treat this as an automation/research system, not guaranteed passive income.
+This project does **not** guarantee bounty income. A finding must be real, reproducible, in scope, eligible, sufficiently demonstrated, and accepted by the program.
 
 ## Roadmap
 
@@ -157,8 +167,11 @@ A bounty is not earned merely because the agent runs. A result must be real, rep
 3. Evidence-grounded LLM finding draft ✅
 4. Human validation gate ✅
 5. Submission gate ✅
-6. Research plugin framework: authorization-aware checks per vulnerability class
-7. Duplicate/history correlation
-8. Better opportunity telemetry from your own accepted/rejected results
-9. Earnings and report-state synchronization
-10. Optional background scheduler after local validation and stable policy controls
+6. Vercel health/API endpoints ✅
+7. Vercel scheduled discovery ✅
+8. Durable cloud finding storage
+9. Authorization-aware research plugins
+10. Duplicate/history correlation
+11. Earnings/report-state synchronization
+12. Hosted LLM worker
+13. Background research scheduler
