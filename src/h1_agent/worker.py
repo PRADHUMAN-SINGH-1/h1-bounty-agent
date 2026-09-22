@@ -13,6 +13,7 @@ from .store import Store
 from .models import Evidence
 from .asset_intelligence import analyze_asset
 from .toolchain import run_deep_toolchain
+from .pattern_library import relevant_patterns
 from .recon_diff import compare_surfaces
 from .research_memory import make_memory
 
@@ -270,12 +271,14 @@ def _research_program(
                 break
         evidence.extend(relevant_tool_evidence)
         evidence_json = [item.__dict__ for item in evidence]
+        matched_patterns = relevant_patterns(evidence, limit=12)
         result["research_trace"] = {
             "checks": [item.name for item in evidence_results],
             "evidence_count": len(evidence_json),
             "deep": deep,
             "active": active,
             "asset_type": asset.asset_type,
+            "matched_patterns": [item.name for item in matched_patterns],
         }
 
         if on_progress:
@@ -298,7 +301,20 @@ def _research_program(
             triage = llm.triage_evidence(
                 handle,
                 target,
-                program_context or {},
+                {
+                    **(program_context or {}),
+                    "matched_patterns": [
+                        {
+                            "name": item.name,
+                            "classes": item.classes,
+                            "prerequisites": item.prerequisites,
+                            "strong_signals": item.strong_signals,
+                            "false_positive_traps": item.false_positive_traps,
+                            "impact": item.impact,
+                        }
+                        for item in matched_patterns
+                    ],
+                },
                 evidence_json,
             )
             leads = triage.get("leads") if isinstance(triage.get("leads"), list) else []
@@ -313,7 +329,20 @@ def _research_program(
                 target,
                 evidence_json,
                 leads=leads,
-                program_context=program_context or {},
+                program_context={
+                    **(program_context or {}),
+                    "matched_patterns": [
+                        {
+                            "name": item.name,
+                            "classes": item.classes,
+                            "prerequisites": item.prerequisites,
+                            "strong_signals": item.strong_signals,
+                            "false_positive_traps": item.false_positive_traps,
+                            "impact": item.impact,
+                        }
+                        for item in matched_patterns
+                    ],
+                },
             )
         except Exception as exc:
             result["skipped"].append(f"{target}: LLM analysis failed: {exc}")
