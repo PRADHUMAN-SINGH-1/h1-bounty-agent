@@ -74,6 +74,7 @@ class Settings:
     dry_run: bool = _bool("DRY_RUN", True)
     allow_active_tests: bool = _bool("ALLOW_ACTIVE_TESTS", False)
     enable_submission: bool = _bool("H1_ENABLE_SUBMISSION", False)
+    auto_submit_findings: bool = _bool("AUTO_SUBMIT_FINDINGS", False)
 
     allow_authz_tests: bool = _bool("ALLOW_AUTHZ_TESTS", False)
     authz_header_a: str = _raw("AUTHZ_HEADER_A")
@@ -87,7 +88,7 @@ class Settings:
 
     autonomous_research: bool = _bool("AUTONOMOUS_RESEARCH", False)
     autonomous_passive_research: bool = _bool("AUTONOMOUS_PASSIVE_RESEARCH", False)
-    autonomous_max_programs: int = max(_int("AUTONOMOUS_MAX_PROGRAMS", 3), 1)
+    autonomous_max_programs: int = max(_int("AUTONOMOUS_MAX_PROGRAMS", 5), 1)
     autonomous_max_targets_per_program: int = max(
         _int("AUTONOMOUS_MAX_TARGETS_PER_PROGRAM", 2),
         1,
