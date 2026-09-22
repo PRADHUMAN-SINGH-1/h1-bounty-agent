@@ -15,7 +15,7 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class Store:
+class JsonStore:
     """Small request-safe JSON state store.
 
     On Vercel this lives in /tmp and is therefore ephemeral. It is deliberately
@@ -173,3 +173,26 @@ class Store:
         state = self._read()
         rows = list(state["findings"].values())
         return sorted(rows, key=lambda row: int(row.get("id", 0)), reverse=True)
+
+
+class Store:
+    """Select durable Postgres storage on Render, JSON storage for local development."""
+
+    def __init__(self, settings: Settings):
+        database_url = os.getenv("DATABASE_URL", "").strip()
+        self._backend = None
+        if database_url:
+            from .postgres_store import PostgresStore
+            self._backend = PostgresStore(database_url)
+        else:
+            self._backend = JsonStore(settings)
+
+    @property
+    def durable(self) -> bool:
+        return bool(self._backend.durable)
+
+    def close(self) -> None:
+        return self._backend.close()
+
+    def __getattr__(self, name: str):
+        return getattr(self._backend, name)
