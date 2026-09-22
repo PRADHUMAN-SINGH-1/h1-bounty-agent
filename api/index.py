@@ -352,7 +352,9 @@ def capabilities(request: Request) -> dict[str, Any]:
             {"name": "Mobile package static analysis", "status": "implemented", "requires": "APK/IPA artifact for local analysis"},
             {"name": "Cloud / IAM footprint analysis", "status": "implemented", "requires": "Cloud references or policy text"},
             {"name": "Attack-chain correlation", "status": "implemented", "requires": "Multiple evidence classes"},
-            {"name": "Scheduled recon integration", "status": "implemented", "requires": "Vercel Cron configuration"},
+            {"name": "Durable background research runner", "status": "implemented", "requires": "GitHub Actions runner + Postgres queue"},
+            {"name": "Open-source recon toolchain", "status": "implemented", "requires": "subfinder/httpx/katana/nuclei/gau/waybackurls"},
+
             {"name": "Deep business-logic / workflow modeling", "status": "implemented", "requires": "Observed authorized application workflow"},
             {"name": "Browser/session trace understanding", "status": "implemented", "requires": "Authorized HAR/browser trace"},
             {"name": "Object ownership model", "status": "implemented", "requires": "Observed object identifiers plus authorized accounts"},
