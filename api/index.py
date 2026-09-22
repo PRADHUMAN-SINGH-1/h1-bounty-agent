@@ -319,6 +319,27 @@ def submit_finding(
     return {"status": "submitted", "report": payload}
 
 
+@app.get("/api/capabilities")
+def capabilities(request: Request) -> dict[str, Any]:
+    _require_session(request)
+    return {
+        "capabilities": [
+            {"name": "Authenticated session mapping", "status": "implemented", "requires": "Authorized session header"},
+            {"name": "Read-only workflow exploration", "status": "implemented", "requires": "In-scope target"},
+            {"name": "IDOR / BOLA differential testing", "status": "implemented", "requires": "Two authorized test accounts"},
+            {"name": "Role / permission differential modeling", "status": "implemented", "requires": "Two authorized test accounts"},
+            {"name": "Stateful read-only API workflows", "status": "implemented", "requires": "OpenAPI or discovered API operations"},
+            {"name": "GraphQL introspection", "status": "implemented", "requires": "In-scope GraphQL endpoint"},
+            {"name": "WebSocket discovery / handshake", "status": "implemented", "requires": "In-scope WebSocket endpoint"},
+            {"name": "Mobile package static analysis", "status": "implemented", "requires": "APK/IPA artifact for local analysis"},
+            {"name": "Cloud / IAM footprint analysis", "status": "implemented", "requires": "Cloud references or policy text"},
+            {"name": "Attack-chain correlation", "status": "implemented", "requires": "Multiple evidence classes"},
+            {"name": "Scheduled recon integration", "status": "implemented", "requires": "Vercel Cron configuration"},
+        ],
+        "human_validation_required": True,
+    }
+
+
 @app.get("/api/programs")
 def programs(request: Request) -> dict[str, Any]:
     _require_session(request)
