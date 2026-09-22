@@ -155,6 +155,7 @@ def health() -> dict[str, Any]:
         "dry_run": os.getenv("DRY_RUN", "true"),
         "active_tests": os.getenv("ALLOW_ACTIVE_TESTS", "false"),
         "autonomous_research": os.getenv("AUTONOMOUS_RESEARCH", "false"),
+        "autonomous_passive_research": os.getenv("AUTONOMOUS_PASSIVE_RESEARCH", "false"),
         "submission_enabled": os.getenv("H1_ENABLE_SUBMISSION", "false"),
     }
 
@@ -305,20 +306,33 @@ def programs(request: Request) -> dict[str, Any]:
 
 
 @app.post("/api/worker")
-def worker(request: Request, x_action_token: str | None = Header(default=None)) -> dict[str, Any]:
+async def worker(request: Request, x_action_token: str | None = Header(default=None)) -> dict[str, Any]:
     _require_session(request)
     _verify_action_token(x_action_token)
     try:
         from h1_agent.config import Settings
         from h1_agent.worker import run_cycle
-        result = run_cycle(Settings())
-        return result
+
+        requested_programs: set[str] | None = None
+        try:
+            body = await request.json()
+            if isinstance(body, dict) and isinstance(body.get("programs"), list):
+                requested_programs = {
+                    str(handle).strip()
+                    for handle in body["programs"]
+                    if str(handle).strip()
+                } or None
+        except Exception:
+            requested_programs = None
+
+        return run_cycle(Settings(), requested_programs=requested_programs)
     except Exception as exc:
         return {
             "status": "error",
             "error_type": "endpoint",
             "error": f"{exc.__class__.__name__}: {exc}",
         }
+
 
 
 @app.get("/api/diagnostics")
@@ -334,6 +348,7 @@ def diagnostics(request: Request) -> dict[str, Any]:
         "dry_run": settings.dry_run,
         "allow_active_tests": settings.allow_active_tests,
         "autonomous_research": settings.autonomous_research,
+        "autonomous_passive_research": settings.autonomous_passive_research,
         "submission_enabled": settings.enable_submission,
     }
     try:
