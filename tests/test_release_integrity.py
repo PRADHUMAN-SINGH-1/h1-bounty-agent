@@ -27,3 +27,11 @@ def test_runtime_defaults_are_safe(monkeypatch):
     assert settings.requests_per_second == 1.0
     assert settings.autonomous_max_programs == 3
     assert settings.autonomous_max_targets_per_program == 2
+
+
+def test_cli_uses_current_llm_and_active_gate():
+    source = (REPO / "src" / "h1_agent" / "cli.py").read_text(encoding="utf-8")
+    assert "from .llm import LocalLLM" not in source
+    assert "from .llm import LLMClient" in source
+    assert "settings.allow_active_tests" in source
+    assert "engine.run(args.target, active=True)" in source
