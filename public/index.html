@@ -46,6 +46,13 @@ pre{white-space:pre-wrap;background:#080f1a;border:1px solid #25354d;border-radi
 <div class="card"><div class="metric" id="submitMode">—</div><div class="muted">Submission mode</div></div>
 </div>
 <div class="card"><h2>Queue</h2><div id="list" class="muted">Loading…</div></div>
+<div class="card">
+<div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
+<div><h2>HackerOne Programs</h2><p class="muted">Select a program after reviewing its current policy and scope.</p></div>
+<button onclick="scanPrograms()">Scan Programs</button>
+</div>
+<div id="programs" class="muted">No scan yet.</div>
+</div>
 </div>
 </main>
 
@@ -114,10 +121,55 @@ async function submitFinding(id){
   if(!confirm("Submit this already-approved report to HackerOne?"))return;
   try{const d=await request("/api/findings/"+id+"/submit",{method:"POST"});alert("Submitted. Report ID: "+(((d.report||{}).data||{}).id||"unknown"));await load()}catch(e){alert(e.message)}
 }
-async function runWorker(){
-  const b=document.getElementById("run"); b.disabled=true; b.textContent="Running…";
-  try{const d=await request("/api/worker",{method:"POST"});alert(JSON.stringify(d,null,2));await load()}catch(e){alert(e.message)}
+async function scanPrograms(){
+  const b=document.getElementById("run"); b.disabled=true; b.textContent="Scanning…";
+  try{
+    const d=await request("/api/worker",{method:"POST",body:JSON.stringify({})});
+    renderPrograms(d.top_opportunities||[]);
+  }catch(e){alert(e.message)}
   finally{b.disabled=false;b.textContent="Run research cycle"}
+}
+
+function renderPrograms(programs){
+  const root=document.getElementById("programs");
+  if(!programs.length){root.innerHTML="<p class=\"muted\">No programs returned.</p>";return;}
+  root.innerHTML=programs.map(p=>{
+    const handle=esc(p.handle);
+    return `<div class="finding card">
+      <div style="display:flex;justify-content:space-between;gap:12px">
+        <div><div class="title">${esc(p.name)}</div>
+        <div class="meta">${handle} · ${esc(p.state)} · ${p.bounty_assets} bounty assets · ${p.eligible_assets} eligible assets</div></div>
+        <span class="badge">score ${p.triage_score}</span>
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <button class="primary" onclick="researchProgram(${JSON.stringify(p.handle)})">Research passively</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function researchProgram(handle){
+  if(!confirm("Confirm you reviewed the current HackerOne program policy and authorize low-impact passive research for this program. Continue?")) return;
+  try{
+    const d=await request("/api/worker",{method:"POST",body:JSON.stringify({programs:[handle]})});
+    renderResult(d);
+    await load();
+  }catch(e){alert(e.message)}
+}
+
+function renderResult(d){
+  const lines=[];
+  lines.push("Status: "+(d.status||"unknown"));
+  lines.push("Mode: "+(d.mode||"unknown"));
+  lines.push("Targets checked: "+(d.researched_targets||0));
+  lines.push("Findings created: "+(d.created_findings||0));
+  if(d.error) lines.push("Error: "+d.error);
+  if(d.skipped&&d.skipped.length) lines.push("Notes:\n- "+d.skipped.join("\n- "));
+  alert(lines.join("\n"));
+}
+
+async function runWorker(){
+  await scanPrograms();
 }
 async function logout(){
   try{await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin"})}catch(e){}
