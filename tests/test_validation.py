@@ -1,20 +1,34 @@
-import pytest
-from h1_agent.validation import FindingDraft, HumanValidationGate
+from h1_agent.models import Evidence, Finding
+from h1_agent.validation import validate_finding
 
-def finding():
-    return FindingDraft("test", "example.com", "evidence", "impact", "steps", 0.9)
 
-def test_submission_requires_human_validation():
-    gate = HumanValidationGate()
-    with pytest.raises(PermissionError):
-        gate.require_validated(finding())
+def test_complete_finding_passes():
+    finding = Finding(
+        "demo",
+        "https://example.com",
+        "Finding",
+        "low",
+        "needs_review",
+        "summary",
+        "impact",
+        ["step"],
+        [Evidence("x", "y", "z")],
+    )
+    assert validate_finding(finding).ok
 
-def test_missing_checks_block_validation():
-    gate = HumanValidationGate()
-    with pytest.raises(ValueError):
-        gate.validate(finding(), set())
 
-def test_all_checks_enable_validation():
-    gate = HumanValidationGate()
-    f = gate.validate(finding(), set(gate.REQUIRED_CHECKS))
-    assert f.human_validated is True
+def test_missing_evidence_blocks():
+    finding = Finding(
+        "demo",
+        "https://example.com",
+        "",
+        None,
+        "needs_review",
+        "",
+        "",
+        [],
+        [],
+    )
+    result = validate_finding(finding)
+    assert not result.ok
+    assert "missing evidence" in result.blockers
