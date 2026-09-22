@@ -33,7 +33,7 @@ def list_findings() -> dict:
     settings = Settings()
     store = Store(settings)
     try:
-        return {"findings": store.list_findings(), "durable_storage": store.durable}
+        return {"findings": store.list_findings(), "durable_storage": store.durable, "action_token": __import__("h1_agent.web_auth", fromlist=["action_token"]).action_token(settings.dashboard_secret)}
     finally:
         store.close()
 
