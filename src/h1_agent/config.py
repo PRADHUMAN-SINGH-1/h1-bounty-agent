@@ -74,9 +74,16 @@ class Settings:
     dashboard_secret: str = _raw("DASHBOARD_SECRET")
 
     def require_hackerone_credentials(self) -> None:
-        if not self.hackerone_username or not self.hackerone_api_token:
+        missing = []
+        if not self.hackerone_username:
+            missing.append("HACKERONE_USERNAME")
+        if not self.hackerone_api_token:
+            missing.append("HACKERONE_API_TOKEN")
+        if missing:
             raise RuntimeError(
-                "Set HACKERONE_USERNAME and HACKERONE_API_TOKEN in the deployment environment."
+                "Missing HackerOne credential(s): " + ", ".join(missing)
+                + ". HACKERONE_USERNAME must be the HackerOne API token Identifier; "
+                  "HACKERONE_API_TOKEN must be the token value."
             )
 
     def require_submission_enabled(self) -> None:
