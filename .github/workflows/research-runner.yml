@@ -1,0 +1,79 @@
+name: H1 Research Runner
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    env:
+      DATABASE_URL: ${{ secrets.RESEARCH_DATABASE_URL }}
+      HACKERONE_USERNAME: ${{ secrets.HACKERONE_USERNAME }}
+      HACKERONE_API_TOKEN: ${{ secrets.HACKERONE_API_TOKEN }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      LLM_PROVIDER: huggingface
+      LLM_MODEL: openai/gpt-oss-120b:fastest
+      LLM_BASE_URL: https://router.huggingface.co/v1
+      LLM_API_KEY: ""
+      DRY_RUN: "true"
+      ALLOW_ACTIVE_TESTS: "false"
+      ALLOW_AUTHZ_TESTS: "false"
+      ALLOW_STATE_CHANGING_TESTS: "false"
+      H1_ENABLE_SUBMISSION: "false"
+      REQUESTS_PER_SECOND: "1"
+      TOOLCHAIN_ENABLED: "true"
+      TOOLCHAIN_MAX_ROOTS: "10"
+      FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM: "50"
+      DEEP_MAX_SCRIPTS: "30"
+      DEEP_MAX_QUERY_LINKS: "20"
+      DEEP_MAX_API_CANDIDATES: "30"
+      DEEP_MAX_OPENAPI_STEPS: "30"
+      DEEP_MAX_GRAPHQL_ENDPOINTS: "10"
+      DEEP_MAX_WEBSOCKET_ENDPOINTS: "10"
+      DEEP_MAX_PAGES: "30"
+      DEEP_MAX_PAGE_LINKS: "80"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          cache: true
+
+      - name: Install Python package
+        run: pip install .
+
+      - name: Install security tooling
+        run: |
+          set -euo pipefail
+          go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install github.com/projectdiscovery/katana/cmd/katana@latest
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          go install github.com/tomnomnom/waybackurls@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          nuclei -update-templates -silent || true
+
+      - name: Validate runner secrets
+        run: |
+          set -euo pipefail
+          test -n "$DATABASE_URL"
+          test -n "$HACKERONE_USERNAME"
+          test -n "$HACKERONE_API_TOKEN"
+          test -n "$HF_TOKEN"
+
+      - name: Run one queued research job
+        run: python scripts/research_runner.py

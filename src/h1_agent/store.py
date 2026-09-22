@@ -204,6 +204,22 @@ class JsonStore:
         jobs[job_id]["updated_at"] = utc_now()
         self._write(state)
 
+    def claim_next_research_job(self) -> dict[str, Any] | None:
+        state = self._read()
+        jobs = state.setdefault("research_jobs", {})
+        queued = [
+            job for job in jobs.values()
+            if job.get("status") == "queued"
+        ]
+        if not queued:
+            return None
+        job = sorted(queued, key=lambda x: x.get("created_at", ""))[0]
+        job["status"] = "running"
+        job["updated_at"] = utc_now()
+        jobs[job["id"]] = job
+        self._write(state)
+        return dict(job)
+
     def get_research_job(self, job_id: str) -> dict[str, Any]:
         state = self._read()
         job = state.get("research_jobs", {}).get(job_id)

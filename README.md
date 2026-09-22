@@ -305,3 +305,33 @@ This project does **not** guarantee bounty income. A finding must be real, repro
 16. Mobile/cloud static analysis ✅
 17. Broader state-changing business-logic tests remain intentionally gated to explicit program authorization and human validation
 
+
+
+## Open-source research toolchain
+
+The deep runner can optionally use well-known open-source security tools when they are present on the GitHub Actions runner:
+
+- ProjectDiscovery subfinder for passive subdomain discovery
+- ProjectDiscovery httpx for HTTP probing and fingerprinting
+- ProjectDiscovery katana for JavaScript-aware crawling
+- ProjectDiscovery nuclei for template-driven vulnerability checks
+- gau and waybackurls for historical URL discovery
+
+The pipeline applies the HackerOne structured scope before tool output is admitted into research evidence. The runner is rate-limited and excludes intrusive/DoS Nuclei tags by default.
+
+### GitHub Actions research runner
+
+Full Research jobs are queued in Postgres and executed by .github/workflows/research-runner.yml rather than relying on a short-lived Render request.
+
+Add these repository secrets in GitHub Actions:
+
+- RESEARCH_DATABASE_URL — the Render Postgres connection string
+- HACKERONE_USERNAME — HackerOne API token identifier
+- HACKERONE_API_TOKEN — HackerOne API token value
+- HF_TOKEN — Hugging Face inference token
+
+The default runner keeps ALLOW_ACTIVE_TESTS=false, ALLOW_AUTHZ_TESTS=false, and H1_ENABLE_SUBMISSION=false.
+
+### Submission
+
+The system remains evidence-gated: a report is only submitted after scope and completeness validation. Blind automatic submission is not enabled by default.
