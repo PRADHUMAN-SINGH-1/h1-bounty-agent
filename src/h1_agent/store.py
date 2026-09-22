@@ -33,6 +33,7 @@ class JsonStore:
                 "findings": {},
                 "research_memory": {},
                 "surface_snapshots": {},
+                "research_jobs": {},
             })
 
     @property
@@ -46,7 +47,7 @@ class JsonStore:
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
-            return {"programs": {}, "scopes": {}, "findings": {}, "research_memory": {}, "surface_snapshots": {}}
+            return {"programs": {}, "scopes": {}, "findings": {}, "research_memory": {}, "surface_snapshots": {}, "research_jobs": {}}
 
     def _write(self, state: dict[str, Any]) -> None:
         fd, tmp = tempfile.mkstemp(
@@ -173,6 +174,42 @@ class JsonStore:
         state = self._read()
         rows = list(state["findings"].values())
         return sorted(rows, key=lambda row: int(row.get("id", 0)), reverse=True)
+
+    def create_research_job(self, data: dict[str, Any]) -> str:
+        state = self._read()
+        jobs = state.setdefault("research_jobs", {})
+        numeric = [int(x[4:]) for x in jobs if str(x).startswith("job-") and str(x)[4:].isdigit()]
+        job_id = f"job-{max(numeric, default=0) + 1}"
+        now = utc_now()
+        jobs[job_id] = {
+            "id": job_id,
+            "status": "queued",
+            "programs": list(data.get("programs", [])),
+            "mode": data.get("mode", "full"),
+            "progress": {"program": None, "target": None, "completed_targets": 0, "planned_targets": 0},
+            "result": None,
+            "error": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        self._write(state)
+        return job_id
+
+    def update_research_job(self, job_id: str, patch: dict[str, Any]) -> None:
+        state = self._read()
+        jobs = state.setdefault("research_jobs", {})
+        if job_id not in jobs:
+            raise KeyError(f"Research job {job_id} not found")
+        jobs[job_id].update(patch)
+        jobs[job_id]["updated_at"] = utc_now()
+        self._write(state)
+
+    def get_research_job(self, job_id: str) -> dict[str, Any]:
+        state = self._read()
+        job = state.get("research_jobs", {}).get(job_id)
+        if job is None:
+            raise KeyError(f"Research job {job_id} not found")
+        return dict(job)
 
 
 class Store:
