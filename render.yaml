@@ -80,6 +80,16 @@ services:
         value: "10"
       - key: DEEP_MAX_CLOUD_TEXT_BYTES
         value: "4000000"
+      - key: DEEP_MAX_PAGES
+        value: "30"
+      - key: DEEP_MAX_PAGE_LINKS
+        value: "80"
+      - key: TOOLCHAIN_ENABLED
+        value: "true"
+      - key: TOOLCHAIN_MAX_ROOTS
+        value: "10"
+      - key: AUTO_SUBMIT
+        value: "false"
       - key: RESEARCH_PROGRAM_ALLOWLIST
         value: ""
 
