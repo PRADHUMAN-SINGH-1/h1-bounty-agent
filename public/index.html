@@ -45,6 +45,7 @@ pre{white-space:pre-wrap;background:#080f1a;border:1px solid #25354d;border-radi
 <div class="card"><div class="metric" id="review">—</div><div class="muted">Awaiting review</div></div>
 <div class="card"><div class="metric" id="submitMode">—</div><div class="muted">Submission mode</div></div>
 </div>
+<div class="card"><h2>Research coverage</h2><div id="capabilities" class="muted">Loading capability matrix…</div></div>
 <div class="card"><h2>Queue</h2><div id="list" class="muted">Loading…</div></div>
 <div class="card">
 <div style="display:flex;justify-content:space-between;gap:12px;align-items:center">
@@ -101,6 +102,7 @@ async function load(){
     document.getElementById("total").textContent=rows.length;
     document.getElementById("review").textContent=rows.filter(x=>x.state==="needs_review"||x.state==="draft").length;
     document.getElementById("submitMode").textContent="Controlled";
+    await loadCapabilities();
     if(!rows.length){document.getElementById("list").innerHTML="<p class='muted'>No report candidates yet.</p>";return;}
     document.getElementById("list").innerHTML=rows.map(x=>{
       let b='<div class="finding card"><div style="display:flex;justify-content:space-between;gap:12px"><div><div class="title">'+esc(x.title||"Untitled")+'</div><div class="meta">'+esc(x.program_handle)+' · '+esc(x.target)+' · '+esc(x.severity||"review")+'</div></div><span class="badge">'+esc(x.state)+'</span></div>';
@@ -124,6 +126,19 @@ async function load(){
     document.getElementById("list").innerHTML="<p class='err'>"+esc(e.message)+"</p>";
   }
 }
+async function loadCapabilities(){
+  try{
+    const data=await request("/api/capabilities");
+    const root=document.getElementById("capabilities");
+    root.innerHTML=(data.capabilities||[]).map(function(item){
+      const req=item.requires ? " · "+esc(item.requires) : "";
+      return '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid #25354d"><span>'+esc(item.name)+'<span class="muted">'+esc(req)+'</span></span><span class="badge" style="border-color:#2f8f6b;color:#71e0c0">✓ Implemented</span></div>';
+    }).join("");
+  }catch(e){
+    document.getElementById("capabilities").innerHTML="<span class='err'>"+esc(e.message)+"</span>";
+  }
+}
+
 async function view(id){
   try{
     document.getElementById("p"+id).textContent=JSON.stringify(await request("/api/findings/"+id),null,2);
