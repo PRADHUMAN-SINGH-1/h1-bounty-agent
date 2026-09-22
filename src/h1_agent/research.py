@@ -204,7 +204,7 @@ class LowImpactResearch:
             url for url in scripts
             if target_is_in_scope(url, self.scopes)[0]
         ]
-        for script_url in in_scope_scripts[:10]:
+        for script_url in in_scope_scripts[: self.settings.deep_max_scripts]:
             try:
                 response = self._get(script_url, follow_redirects=False)
                 content_type = response.headers.get("content-type", "")
@@ -295,7 +295,7 @@ class LowImpactResearch:
         checks.append(CheckResult("cors_probe", status, status.replace("_", " "), evidence))
 
         if query_links:
-            for url in query_links[:4]:
+            for url in query_links[: self.settings.deep_max_query_links]:
                 status, evidence = reflection_probe(self.client, url, self._get)
                 if status != "skipped":
                     checks.append(CheckResult("reflection_probe", status, f"Query reflection check for {url}", evidence))
@@ -344,7 +344,7 @@ class LowImpactResearch:
                 or "/v2/" in endpoint.url.lower()
             )
         ]
-        for api_url in api_candidates[:8]:
+        for api_url in api_candidates[: self.settings.deep_max_api_candidates]:
             status, evidence = sensitive_response_probe(api_url, self._get)
             checks.append(CheckResult(
                 "sensitive_response_probe",
@@ -373,7 +373,7 @@ class LowImpactResearch:
                 deduped_openapi,
                 base,
                 self.scopes,
-                max_steps=min(self.settings.authz_max_endpoints, 20),
+                max_steps=self.settings.deep_max_openapi_steps,
             )
             checks.append(CheckResult(
                 "stateful_api_workflow",
@@ -383,16 +383,16 @@ class LowImpactResearch:
             ))
 
         graphql_urls = discover_graphql_endpoints([endpoint.url for endpoint in unique_surface], self.scopes)
-        for graphql_url in graphql_urls:
+        for graphql_url in graphql_urls[: self.settings.deep_max_graphql_endpoints]:
             status, evidence = introspection_probe(self.client, graphql_url, self.scopes)
             checks.append(CheckResult("graphql_introspection", status, f"GraphQL schema read for {graphql_url}", evidence))
 
         websocket_urls = discover_websocket_urls(home_response.text[:2_000_000], base, self.scopes)
-        for websocket_url in websocket_urls:
+        for websocket_url in websocket_urls[: self.settings.deep_max_websocket_endpoints]:
             status, evidence = websocket_handshake_probe(self.client, websocket_url, self.scopes)
             checks.append(CheckResult("websocket_handshake", status, f"WebSocket endpoint check for {websocket_url}", evidence))
 
-        cloud_text = html + "\n" + "\n".join(text for _url, text in script_texts)
+        cloud_text = (html + "\n" + "\n".join(text for _url, text in script_texts))[: self.settings.deep_max_cloud_text_bytes]
         cloud_result, cloud_evidence = analyze_cloud_text(cloud_text, base)
         if cloud_result["aws_arns"] or cloud_result["azure_storage_urls"] or cloud_result["gcp_storage_hosts"] or cloud_result["policy_observations"]:
             checks.append(CheckResult("cloud_iam_analysis", "review", "Cloud footprint and policy indicators discovered", cloud_evidence))
