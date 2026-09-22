@@ -121,6 +121,19 @@ def _research_program(
             )
             continue
 
+        metadata = {
+            "affected_component": draft.get("affected_component") or "",
+            "preconditions": draft.get("preconditions") or "",
+            "observed_behavior": draft.get("observed_behavior") or "",
+            "expected_behavior": draft.get("expected_behavior") or "",
+            "attack_scenario": draft.get("attack_scenario") or "",
+            "remediation": draft.get("remediation") or "",
+            "references": draft.get("references") or [],
+            "weakness_name": draft.get("weakness_name") or "",
+            "cvss_score": draft.get("cvss_score"),
+            "cvss_vector": draft.get("cvss_vector") or "",
+            "missing_validation": draft.get("missing_validation") or [],
+        }
         finding_id = store.create_finding(
             {
                 "program_handle": handle,
@@ -133,6 +146,8 @@ def _research_program(
                 "reproduction": draft.get("reproduction", []),
                 "evidence": evidence_json,
                 "structured_scope_id": asset.id,
+                "weakness_id": draft.get("weakness_id"),
+                "metadata": metadata,
             }
         )
         result["created_findings"] += 1
