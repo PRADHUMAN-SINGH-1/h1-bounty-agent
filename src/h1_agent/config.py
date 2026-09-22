@@ -39,6 +39,31 @@ def _csv(name: str) -> tuple[str, ...]:
     return tuple(x.strip() for x in _raw(name).split(",") if x.strip())
 
 
+def _llm_provider() -> str:
+    configured = _raw("LLM_PROVIDER", "")
+    if os.getenv("VERCEL"):
+        # Never let the local Ollama setting leak into a deployed Vercel worker.
+        if configured in {"", "ollama"}:
+            return "vercel_gateway"
+    return configured or "ollama"
+
+
+def _llm_base_url(provider: str) -> str:
+    if os.getenv("VERCEL") and provider in {"vercel_gateway", "ai_gateway"}:
+        return "https://ai-gateway.vercel.sh/v1"
+    if provider in {"vercel_gateway", "ai_gateway"}:
+        return _raw("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1")
+    return _raw("LLM_BASE_URL", "http://127.0.0.1:11434")
+
+
+def _llm_model(provider: str) -> str:
+    if os.getenv("VERCEL") and provider in {"vercel_gateway", "ai_gateway"}:
+        return "inclusionai/ling-3.0-flash-vl-free"
+    if provider in {"vercel_gateway", "ai_gateway"}:
+        return _raw("LLM_MODEL", "inclusionai/ling-3.0-flash-vl-free")
+    return _raw("LLM_MODEL", "llama3.1:8b")
+
+
 @dataclass(frozen=True)
 class Settings:
     hackerone_username: str = _raw("HACKERONE_USERNAME")
@@ -61,9 +86,9 @@ class Settings:
 
     blob_token: str = _raw("BLOB_READ_WRITE_TOKEN")
 
-    llm_provider: str = _raw("LLM_PROVIDER", "vercel_gateway" if os.getenv("VERCEL") else "ollama").lower()
-    llm_base_url: str = _raw("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1" if os.getenv("VERCEL") else "http://127.0.0.1:11434")
-    llm_model: str = _raw("LLM_MODEL", "inclusionai/ling-3.0-flash-vl-free" if os.getenv("VERCEL") else "llama3.1:8b")
+    llm_provider: str = _llm_provider()
+    llm_base_url: str = _llm_base_url(llm_provider)
+    llm_model: str = _llm_model(llm_provider)
     hf_token: str = _raw("HF_TOKEN")
     llm_api_key: str = _raw("LLM_API_KEY")
 
