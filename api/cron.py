@@ -11,8 +11,10 @@ app = FastAPI(title="H1 Bounty Agent Cron", version="0.4.0")
 
 
 def _guard(authorization: str | None) -> None:
-    secret = os.getenv("CRON_SECRET")
-    if secret and authorization != f"Bearer {secret}":
+    secret = os.getenv("CRON_SECRET", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured.")
+    if authorization != f"Bearer {secret}":
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
