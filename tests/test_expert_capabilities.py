@@ -62,7 +62,12 @@ def test_graphql_introspection_is_read_only_and_parsed():
         id = "1"
         max_severity = confidentiality_requirement = integrity_requirement = availability_requirement = reference = None
 
-    status, evidence = introspection_probe(fake_post if False else type("C", (), {"post": fake_post})(), "https://example.com/graphql", [Scope()])
+    class Client:
+        @staticmethod
+        def post(url, **kwargs):
+            return fake_post(url, **kwargs)
+
+    status, evidence = introspection_probe(Client(), "https://example.com/graphql", [Scope()])
     assert status == "introspection_enabled"
     assert any(item.name == "graphql_introspection" for item in evidence)
 
