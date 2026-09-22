@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from urllib.parse import urlparse
 
 from .config import Settings
 from .discovery import rank
@@ -11,6 +12,7 @@ from .scope import normalize_scopes
 from .store import Store
 from .models import Evidence
 from .asset_intelligence import analyze_asset
+from .toolchain import run_deep_toolchain
 from .recon_diff import compare_surfaces
 from .research_memory import make_memory
 
@@ -124,6 +126,27 @@ def _research_program(
         max_targets,
         exhaustive=deep and not active,
     )
+
+    program_tool_evidence: list[Evidence] = []
+    toolchain_runs = []
+    if deep and settings.toolchain_enabled:
+        roots = []
+        for scoped_asset in selected_assets:
+            candidate = _target_for_asset(scoped_asset)
+            if candidate and candidate.startswith(("http://", "https://")):
+                roots.append(candidate)
+        if roots:
+            try:
+                program_tool_evidence, toolchain_runs = run_deep_toolchain(
+                    roots,
+                    scopes,
+                    max_roots=settings.toolchain_max_roots,
+                    active=active,
+                )
+                result["checks_run"] += len(toolchain_runs)
+                result["evidence_collected"] += len(program_tool_evidence)
+            except Exception as exc:
+                result["skipped"].append(f"toolchain: {exc.__class__.__name__}: {exc}")
     if on_progress:
         on_progress({
             "program": handle,
@@ -236,6 +259,16 @@ def _research_program(
         ]
         store.save_memory(f"{handle}:{target}", memory_items)
 
+        relevant_tool_evidence = []
+        target_host = (urlparse(target).hostname or "").lower()
+        for item in program_tool_evidence:
+            item_host = (urlparse(item.source).hostname or "").lower()
+            if item.name == "nuclei_match" and item_host and target_host and item_host != target_host:
+                continue
+            relevant_tool_evidence.append(item)
+            if len(relevant_tool_evidence) >= 250:
+                break
+        evidence.extend(relevant_tool_evidence)
         evidence_json = [item.__dict__ for item in evidence]
         result["research_trace"] = {
             "checks": [item.name for item in evidence_results],
@@ -479,6 +512,10 @@ def run_cycle(
                             "name": attrs.get("name") or handle,
                             "state": attrs.get("state") or "",
                             "policy": attrs.get("policy") or attrs.get("description") or "",
+                            "toolchain": [
+                                {"name": run.name, "status": run.status, "detail": run.detail}
+                                for run in locals().get("toolchain_runs", [])
+                            ],
                         },
                     )
                 except HackerOneAPIError as exc:
