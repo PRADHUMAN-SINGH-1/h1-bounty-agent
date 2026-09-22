@@ -151,7 +151,7 @@ Vercel cannot run your Mac's local Ollama process. The production configuration 
 
 ## Render deployment
 
-Vercel is not required for production hosting. This repository includes a Render Blueprint with a FastAPI web service, a scheduled research cron job, and Render Postgres for durable findings/research memory.
+Vercel is not required for production hosting. This repository includes a Render Blueprint with a free FastAPI web service and Render Postgres, while scheduled research is triggered by GitHub Actions instead of a paid Render Cron Job.
 
 The Render web service runs:
 
@@ -159,7 +159,7 @@ The Render web service runs:
 uvicorn api.index:app --host 0.0.0.0 --port $PORT
 ```
 
-Render Web Services deploy from a connected Git repository and expose an `onrender.com` URL. Render Cron Jobs run scheduled commands separately, and Render Postgres provides managed persistent database storage. citeturn337425search3turn337425search1turn337425search2
+Render Web Services deploy from a connected Git repository and expose an `onrender.com` URL. GitHub Actions triggers the existing `/api/cron` endpoint using two repository secrets: `H1_AGENT_URL` (the Render service URL) and `CRON_SECRET` (the matching Render secret). citeturn337425search3turn337425search1turn337425search2
 
 To deploy:
 
@@ -169,7 +169,7 @@ To deploy:
 4. Enter the prompted secrets: HackerOne API credentials, dashboard username/password, and your LLM provider credentials.
 5. Open the generated `onrender.com` URL and use the existing H1 dashboard.
 
-The cron job is configured for daily discovery at 03:00 UTC. Render cron schedules use UTC and run independently from the web service. citeturn337425search1
+Scheduled research is configured in `.github/workflows/scheduled-research.yml` for daily discovery at 03:00 UTC. GitHub-hosted runners are free for public repositories, and scheduled workflows run from the default branch. citeturn684118search2turn684118search4
 
 The application uses Postgres whenever `DATABASE_URL` is present, while local development without `DATABASE_URL` continues to use the JSON store. Render Blueprint `fromDatabase` wiring injects the database connection string without committing credentials to the repository. citeturn360941search0turn360941search4
 
