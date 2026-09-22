@@ -6,9 +6,9 @@ import re
 from .models import Evidence
 
 
-ARN_RE = re.compile(r"arn:aws:[A-Za-z0-9_-]+:[^\\s\"']+")
-AZURE_RE = re.compile(r"https://[A-Za-z0-9.-]+\\.blob\\.core\\.windows\\.net(?:/[^\\s\"']*)?")
-GCP_RE = re.compile(r"[A-Za-z0-9._-]+\\.storage\\.googleapis\\.com")
+ARN_RE = re.compile(r"arn:aws:[A-Za-z0-9_-]+:[^\s\"']+")
+AZURE_RE = re.compile(r"https://[A-Za-z0-9.-]+\.blob\.core\.windows\.net(?:/[^\s\"']*)?")
+GCP_RE = re.compile(r"[A-Za-z0-9._-]+\.storage\.googleapis\.com")
 
 
 def analyze_cloud_text(text: str, source: str) -> tuple[dict, list[Evidence]]:
@@ -17,7 +17,7 @@ def analyze_cloud_text(text: str, source: str) -> tuple[dict, list[Evidence]]:
     gcp = sorted(set(GCP_RE.findall(text)))[:100]
 
     findings = []
-    if re.search(r'"Action"\\s*:\\s*"\\*"', text) and re.search(r'"Resource"\\s*:\\s*"\\*"', text):
+    if re.search(r'"Action"\s*:\s*"\*"', text) and re.search(r'"Resource"\s*:\s*"\*"', text):
         findings.append("wildcard_cloud_policy")
 
     result = {
