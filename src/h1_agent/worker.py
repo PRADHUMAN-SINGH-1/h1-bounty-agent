@@ -213,8 +213,75 @@ def run_cycle(
     api = None
 
     try:
+        api = HackerOneClient(settings)
+
+        # A selected-program request should not rescan the entire HackerOne catalog.
+        if requested_programs:
+            summary["mode"] = "selected-program-passive-research"
+            per_program = []
+
+            for handle in sorted(requested_programs):
+                try:
+                    program_payload = api.program(handle)
+                    attrs = program_payload.get("data", {}).get("attributes", {})
+                    if attrs.get("handle") and attrs.get("handle") != handle:
+                        raise RuntimeError(
+                            f"HackerOne returned handle {attrs.get('handle')} for requested {handle}."
+                        )
+
+                    store.save_program(program_payload)
+                    result = _research_program(
+                        settings,
+                        api,
+                        store,
+                        handle,
+                        settings.autonomous_max_targets_per_program,
+                        active=False,
+                    )
+                except HackerOneAPIError as exc:
+                    result = {
+                        "program": handle,
+                        "status": "blocked",
+                        "error_type": "hackerone_api",
+                        "error": str(exc),
+                        "targets_checked": 0,
+                        "created_findings": 0,
+                        "findings": [],
+                        "skipped": [],
+                    }
+                except Exception as exc:
+                    result = {
+                        "program": handle,
+                        "status": "error",
+                        "error_type": "selected_program",
+                        "error": f"{exc.__class__.__name__}: {exc}",
+                        "targets_checked": 0,
+                        "created_findings": 0,
+                        "findings": [],
+                        "skipped": [],
+                    }
+
+                per_program.append(result)
+                summary["researched_targets"] += result.get("targets_checked", 0)
+                summary["created_findings"] += result.get("created_findings", 0)
+                summary["findings"].extend(result.get("findings", []))
+                summary["skipped"].extend(
+                    [{"program": handle, "reason": reason} for reason in result.get("skipped", [])]
+                )
+
+                if result.get("error"):
+                    summary["skipped"].append(
+                        {"program": handle, "reason": result["error"]}
+                    )
+
+            summary["program_results"] = per_program
+            if any(r.get("status") == "error" for r in per_program):
+                summary["status"] = "error"
+            elif all(r.get("status") == "blocked" for r in per_program):
+                summary["status"] = "blocked"
+            return summary
+
         try:
-            api = HackerOneClient(settings)
             payload = api.programs(page=1, page_size=25)
         except HackerOneAPIError as exc:
             summary["status"] = "blocked"
@@ -229,8 +296,6 @@ def run_cycle(
             return summary
 
         ranked = []
-        program_handles = set()
-
         for item in payload.get("data", []):
             attrs = item.get("attributes", {})
             handle = attrs.get("handle")
@@ -255,6 +320,7 @@ def run_cycle(
             }
             store.save_program(api_program)
             store.save_scopes(handle, scopes_payload)
+
             opportunity = rank(
                 handle,
                 attrs.get("name", handle),
@@ -262,44 +328,9 @@ def run_cycle(
                 scopes,
             )
             ranked.append((opportunity, scopes))
-            program_handles.add(handle)
 
         ranked.sort(key=lambda pair: (-pair[0].score, pair[0].handle))
         summary["checked_programs"] = len(ranked)
-
-        if requested_programs:
-            selected = [
-                handle
-                for handle in requested_programs
-                if handle in program_handles
-            ]
-            if not selected:
-                summary["status"] = "blocked"
-                summary["mode"] = "selected-programs"
-                summary["error"] = "None of the requested program handles were returned by HackerOne."
-                return summary
-
-            summary["mode"] = "selected-program-passive-research"
-            per_program = []
-            for handle in selected:
-                result = _research_program(
-                    settings,
-                    api,
-                    store,
-                    handle,
-                    settings.autonomous_max_targets_per_program,
-                    active=False,
-                )
-                per_program.append(result)
-                summary["researched_targets"] += result.get("targets_checked", 0)
-                summary["created_findings"] += result.get("created_findings", 0)
-                summary["findings"].extend(result.get("findings", []))
-                summary["skipped"].extend(
-                    [{"program": handle, "reason": reason} for reason in result.get("skipped", [])]
-                )
-
-            summary["program_results"] = per_program
-            return summary
 
         if settings.autonomous_passive_research:
             allowlist = set(settings.research_program_allowlist)
