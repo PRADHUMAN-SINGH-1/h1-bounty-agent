@@ -241,7 +241,7 @@ def main() -> None:
                 )
             )
 
-            llm = LocalLLM(settings)
+            llm = LLMClient(settings)
             if llm.available():
                 draft = llm.draft_finding(args.handle, args.target, evidence_json)
                 finding_id = store.create_finding(
@@ -280,6 +280,7 @@ def _row_to_finding(row: dict) -> Finding:
         evidence=[Evidence(**e) for e in row["evidence"]],
         structured_scope_id=row.get("structured_scope_id"),
         weakness_id=row.get("weakness_id"),
+        metadata=row.get("metadata") or {},
     )
 
 
