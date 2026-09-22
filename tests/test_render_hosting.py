@@ -18,7 +18,7 @@ def test_render_blueprint_contains_free_web_and_database():
 def test_github_scheduler_is_configured():
     text = Path(".github/workflows/scheduled-research.yml").read_text(encoding="utf-8")
     assert 'cron: "0 3 * * *"' in text
-    assert '"/api/cron"' in text
+    assert "$H1_AGENT_URL/api/cron" in text
     assert "CRON_SECRET" in text
 
 
