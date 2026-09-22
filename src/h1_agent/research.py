@@ -16,7 +16,7 @@ from .attack_surface import (
 )
 from .config import Settings
 from .models import Evidence, ScopeAsset
-from .scope import require_in_scope
+from .scope import require_in_scope, target_is_in_scope
 from .vulnerability_checks import (
     api_spec_probe,
     cookie_probe,
@@ -162,11 +162,22 @@ class LowImpactResearch:
         checks: list[CheckResult] = []
         html = home_response.text[:2_000_000]
         links, scripts, _forms = discover_page(html, base)
-        query_links = interesting_query_links(links, base)
+        query_links = [
+            url for url in interesting_query_links(links, base)
+            if target_is_in_scope(url, self.scopes)[0]
+        ]
 
-        surface = discover_from_html(html, base)
+        surface = [
+            endpoint
+            for endpoint in discover_from_html(html, base)
+            if target_is_in_scope(endpoint.url, self.scopes)[0]
+        ]
         script_texts: list[tuple[str, str]] = []
-        for script_url in scripts[:10]:
+        in_scope_scripts = [
+            url for url in scripts
+            if target_is_in_scope(url, self.scopes)[0]
+        ]
+        for script_url in in_scope_scripts[:10]:
             try:
                 response = self._get(script_url, follow_redirects=False)
                 content_type = response.headers.get("content-type", "")
@@ -237,8 +248,17 @@ class LowImpactResearch:
             ))
 
         if self.settings.allow_authz_tests and self.settings.authz_header_a and self.settings.authz_header_b:
-            authz_urls = [endpoint.url for endpoint in unique_surface if "/api/" in endpoint.url.lower() or "graphql" in endpoint.url.lower()]
-            authz_urls.extend(endpoint.url for endpoint in openapi_endpoints[:20])
+            authz_urls = [
+                endpoint.url
+                for endpoint in unique_surface
+                if target_is_in_scope(endpoint.url, self.scopes)[0]
+                and ("/api/" in endpoint.url.lower() or "graphql" in endpoint.url.lower())
+            ]
+            authz_urls.extend(
+                endpoint.url
+                for endpoint in openapi_endpoints[:20]
+                if target_is_in_scope(endpoint.url, self.scopes)[0]
+            )
             try:
                 tester = AuthorizationDifferentialTester(
                     self.client,
