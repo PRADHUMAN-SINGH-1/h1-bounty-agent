@@ -49,15 +49,22 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 The repository now includes:
 
 - `api/index.py` → health endpoint
+- `index.py` → authenticated web review dashboard
 - `api/programs.py` → authenticated HackerOne program endpoint
-- `api/cron.py` → scheduled program/scope triage worker
+- `api/findings.py` → finding review/approval/submission API
+- `api/worker.py` → authenticated on-demand research cycle
+- `api/cron.py` → scheduled worker
 - `vercel.json` → Vercel Function + Cron configuration
 
 After Vercel rebuilds from the latest `main` commit:
 
 - `/api` returns service health.
-- `/api/programs` checks the HackerOne API.
-- `/api/cron` performs the scheduled program/scope triage.
+- `/api` returns service health.
+- `/api/programs` checks the HackerOne API after dashboard authentication.
+- `/api/findings` exposes the private review queue after dashboard authentication.
+- `/api/cron` runs the scheduled worker and requires `CRON_SECRET`.
+- `/api/worker` runs one on-demand cycle after dashboard authentication.
+- `/` opens the review dashboard.
 
 The cron worker now supports two modes. Discovery runs automatically. Authorized low-impact research is opt-in through `AUTONOMOUS_RESEARCH=true`, `ALLOW_ACTIVE_TESTS=true`, and an explicit `RESEARCH_PROGRAM_ALLOWLIST`; it never submits reports automatically.
 
@@ -86,7 +93,6 @@ BLOB_READ_WRITE_TOKEN=<private Vercel Blob credential>
 DASHBOARD_USER=<username>
 DASHBOARD_PASSWORD=<strong password>
 DASHBOARD_SECRET=<random secret>
-CRON_SECRET=<random secret>
 
 # Hosted LLM for Vercel
 LLM_PROVIDER=huggingface
@@ -179,7 +185,7 @@ HackerOne currently requires a human-in-the-loop for AI-assisted Hackbot activit
 
 ## Zero-cash starting point
 
-The initial system is designed to avoid per-request LLM costs during local development by using a local model. The deployed Vercel worker can run scheduled HackerOne discovery without an LLM, but the full AI research layer requires hosted inference or another compute environment.
+The initial system is designed to avoid per-request LLM costs during local development by using a local model. The deployed Vercel worker can run scheduled HackerOne discovery without an LLM. When the Hugging Face provider is configured and authorized research is enabled, it can also draft evidence-grounded report candidates.
 
 This project does **not** guarantee bounty income. A finding must be real, reproducible, in scope, eligible, sufficiently demonstrated, and accepted by the program.
 
