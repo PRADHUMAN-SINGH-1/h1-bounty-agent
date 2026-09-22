@@ -107,6 +107,7 @@ class Store:
             "approved_at": None,
             "submitted_at": None,
             "h1_report_id": None,
+            "metadata": data.get("metadata", {}),
         }
         state["findings"][str(finding_id)] = record
         self._write(state)
