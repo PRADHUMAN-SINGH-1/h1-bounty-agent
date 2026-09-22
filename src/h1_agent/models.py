@@ -17,6 +17,11 @@ class ScopeAsset:
     eligible_for_bounty: bool
     eligible_for_submission: bool
     instruction: str = ""
+    max_severity: str | None = None
+    confidentiality_requirement: str | None = None
+    integrity_requirement: str | None = None
+    availability_requirement: str | None = None
+    reference: str | None = None
 
 
 @dataclass(frozen=True)
