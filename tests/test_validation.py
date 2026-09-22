@@ -13,6 +13,13 @@ def test_complete_finding_passes():
         "impact",
         ["step"],
         [Evidence("x", "y", "z")],
+        "1",
+        None,
+        {
+            "affected_component": "Example endpoint",
+            "observed_behavior": "Observed",
+            "expected_behavior": "Expected",
+        },
     )
     assert validate_finding(finding).ok
 
