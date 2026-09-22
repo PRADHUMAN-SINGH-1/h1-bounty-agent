@@ -270,5 +270,12 @@ class LowImpactResearch:
 def flatten(results: list[CheckResult]) -> list[Evidence]:
     evidence: list[Evidence] = []
     for result in results:
+        evidence.append(
+            Evidence(
+                "check_result",
+                f"{result.name}: status={result.status}; detail={result.detail}",
+                "h1-bounty-agent",
+            )
+        )
         evidence.extend(result.evidence)
     return evidence
