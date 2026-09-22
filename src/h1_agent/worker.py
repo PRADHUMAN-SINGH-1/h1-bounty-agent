@@ -4,7 +4,7 @@ from dataclasses import asdict
 
 from .config import Settings
 from .discovery import rank
-from .hackerone import HackerOneClient
+from .hackerone import HackerOneAPIError, HackerOneClient
 from .llm import LLMClient
 from .research import LowImpactResearch, flatten
 from .scope import normalize_scopes
@@ -26,8 +26,6 @@ def _target_for_asset(asset) -> str | None:
 
 
 def run_cycle(settings: Settings) -> dict:
-    store = Store(settings)
-    api = HackerOneClient(settings)
     summary = {
         "status": "ok",
         "mode": "discovery",
@@ -38,8 +36,24 @@ def run_cycle(settings: Settings) -> dict:
         "findings": [],
     }
 
+    store = Store(settings)
+    api = None
+
     try:
-        payload = api.programs(page=1, page_size=100)
+        try:
+            api = HackerOneClient(settings)
+            payload = api.programs(page=1, page_size=25)
+        except HackerOneAPIError as exc:
+            summary["status"] = "blocked"
+            summary["error"] = str(exc)
+            summary["error_type"] = "hackerone_api"
+            return summary
+        except RuntimeError as exc:
+            summary["status"] = "blocked"
+            summary["error"] = str(exc)
+            summary["error_type"] = "configuration"
+            return summary
+
         ranked = []
 
         for item in payload.get("data", []):
@@ -47,11 +61,14 @@ def run_cycle(settings: Settings) -> dict:
             handle = attrs.get("handle")
             if not handle:
                 continue
+
             try:
                 scopes_payload = api.structured_scopes(handle)
                 scopes = normalize_scopes(scopes_payload)
             except Exception as exc:
-                summary["skipped"].append({"program": handle, "reason": f"scope fetch failed: {exc}"})
+                summary["skipped"].append(
+                    {"program": handle, "reason": f"scope fetch failed: {exc}"}
+                )
                 continue
 
             api_program = {
@@ -63,25 +80,37 @@ def run_cycle(settings: Settings) -> dict:
             }
             store.save_program(api_program)
             store.save_scopes(handle, scopes_payload)
-            opportunity = rank(handle, attrs.get("name", handle), attrs.get("state", ""), scopes)
+            opportunity = rank(
+                handle,
+                attrs.get("name", handle),
+                attrs.get("state", ""),
+                scopes,
+            )
             ranked.append((opportunity, scopes))
 
         ranked.sort(key=lambda pair: (-pair[0].score, pair[0].handle))
         summary["checked_programs"] = len(ranked)
 
         if not settings.autonomous_research:
-            summary["top_opportunities"] = [asdict(item[0]) | {"triage_score": item[0].score} for item in ranked[:10]]
+            summary["top_opportunities"] = [
+                asdict(item[0]) | {"triage_score": item[0].score}
+                for item in ranked[:10]
+            ]
             return summary
 
         settings.require_autonomous_research()
         allowlist = set(settings.research_program_allowlist)
         llm = LLMClient(settings)
+
         if not llm.available():
             summary["status"] = "blocked"
-            summary["skipped"].append({"reason": "LLM provider is not configured/available"})
+            summary["error"] = "LLM provider is not configured/available."
+            summary["error_type"] = "llm"
             return summary
 
-        for opportunity, scopes in ranked:
+        research_ranked = ranked[: settings.autonomous_max_programs]
+
+        for opportunity, scopes in research_ranked:
             if opportunity.handle not in allowlist:
                 continue
 
@@ -94,7 +123,7 @@ def run_cycle(settings: Settings) -> dict:
                 target = _target_for_asset(asset)
                 if target:
                     targets.append((asset, target))
-                if len(targets) >= max(settings.autonomous_max_targets_per_program, 1):
+                if len(targets) >= settings.autonomous_max_targets_per_program:
                     break
 
             for asset, target in targets:
@@ -112,7 +141,11 @@ def run_cycle(settings: Settings) -> dict:
                     results = engine.run(target)
                 except Exception as exc:
                     summary["skipped"].append(
-                        {"program": opportunity.handle, "target": target, "reason": str(exc)}
+                        {
+                            "program": opportunity.handle,
+                            "target": target,
+                            "reason": str(exc),
+                        }
                     )
                     continue
                 finally:
@@ -121,12 +154,31 @@ def run_cycle(settings: Settings) -> dict:
                 summary["researched_targets"] += 1
                 evidence = flatten(results)
                 evidence_json = [item.__dict__ for item in evidence]
-                draft = llm.draft_finding(opportunity.handle, target, evidence_json)
+
+                try:
+                    draft = llm.draft_finding(
+                        opportunity.handle,
+                        target,
+                        evidence_json,
+                    )
+                except Exception as exc:
+                    summary["skipped"].append(
+                        {
+                            "program": opportunity.handle,
+                            "target": target,
+                            "reason": f"LLM analysis failed: {exc}",
+                        }
+                    )
+                    continue
 
                 if draft.get("status") != "candidate":
                     continue
 
-                confidence = float(draft.get("confidence") or 0)
+                try:
+                    confidence = float(draft.get("confidence") or 0)
+                except (TypeError, ValueError):
+                    confidence = 0
+
                 if confidence < 0.70:
                     summary["skipped"].append(
                         {
@@ -151,6 +203,7 @@ def run_cycle(settings: Settings) -> dict:
                         "structured_scope_id": asset.id,
                     }
                 )
+
                 summary["created_findings"] += 1
                 summary["findings"].append(
                     {
@@ -165,6 +218,13 @@ def run_cycle(settings: Settings) -> dict:
 
         summary["mode"] = "autonomous-authorized-research"
         return summary
+
+    except Exception as exc:
+        summary["status"] = "error"
+        summary["error"] = f"{exc.__class__.__name__}: {exc}"
+        summary["error_type"] = "worker"
+        return summary
     finally:
-        api.close()
+        if api is not None:
+            api.close()
         store.close()
