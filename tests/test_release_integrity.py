@@ -16,7 +16,7 @@ def test_dashboard_uses_event_binding_for_all_buttons():
     assert "onclick=" not in html
     for action in ("connectBtn", "run", "refreshBtn", "logoutBtn", "scanBtn"):
         assert f'id="{action}"' in html
-    for action in ("data-view-id", "data-approve-id", "data-submit-id", "data-research-handle"):
+    for action in ("data-view-id", "data-approve-id", "data-submit-id", "data-research-handle", "data-assess-handle"):
         assert action in html
     assert html.count('addEventListener("click"') >= 8
 
