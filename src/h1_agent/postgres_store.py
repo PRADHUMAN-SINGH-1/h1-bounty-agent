@@ -25,7 +25,13 @@ class PostgresStore:
         return True
 
     def _connect(self):
-        return psycopg.connect(self.database_url, row_factory=dict_row)
+        return psycopg.connect(
+            self.database_url,
+            row_factory=dict_row,
+            connect_timeout=15,
+            application_name="h1-bounty-agent",
+            autocommit=True,
+        )
 
     def _ensure_schema(self) -> None:
         statements = [
@@ -96,6 +102,33 @@ class PostgresStore:
         ]
         with self._connect() as conn:
             for statement in statements:
+                conn.execute(statement)
+
+            migrations = [
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS severity TEXT",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'needs_review'",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS summary TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS impact TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS reproduction JSONB NOT NULL DEFAULT '[]'::jsonb",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '[]'::jsonb",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS structured_scope_id TEXT",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS weakness_id INTEGER",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS report_json JSONB",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS submitted_at TIMESTAMPTZ",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS h1_report_id TEXT",
+                "ALTER TABLE h1_findings ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb",
+                "ALTER TABLE h1_research_jobs ADD COLUMN IF NOT EXISTS programs JSONB NOT NULL DEFAULT '[]'::jsonb",
+                "ALTER TABLE h1_research_jobs ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'full'",
+                "ALTER TABLE h1_research_jobs ADD COLUMN IF NOT EXISTS progress JSONB NOT NULL DEFAULT '{}'::jsonb",
+                "ALTER TABLE h1_research_jobs ADD COLUMN IF NOT EXISTS result JSONB",
+                "ALTER TABLE h1_research_jobs ADD COLUMN IF NOT EXISTS error TEXT",
+                "ALTER TABLE h1_research_jobs ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+                "ALTER TABLE h1_research_jobs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+            ]
+            for statement in migrations:
                 conn.execute(statement)
 
     def close(self) -> None:
