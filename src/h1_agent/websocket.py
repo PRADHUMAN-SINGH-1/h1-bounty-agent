@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 from urllib.parse import urlparse
 
 from .models import Evidence
@@ -10,12 +11,10 @@ from .scope import target_is_in_scope
 
 def discover_websocket_urls(text: str, base_url: str, scopes) -> list[str]:
     found = set()
-    for match in __import__("re").finditer(r"""(?:wss?|https?)://[^"'\\s<>]+""", text, flags=__import__("re").I):
+    for match in re.finditer(r"""wss?://[^"'\\s<>]+""", text, flags=re.I):
         url = match.group(0)
-        if url.startswith("http://") or url.startswith("https://"):
-            parsed = urlparse(url)
-            url = ("wss://" if parsed.scheme == "https" else "ws://") + parsed.netloc + parsed.path
-        if target_is_in_scope(url.replace("ws://", "https://").replace("wss://", "https://"), scopes)[0]:
+        scope_url = url.replace("ws://", "https://").replace("wss://", "https://")
+        if target_is_in_scope(scope_url, scopes)[0]:
             found.add(url)
     return sorted(found)[:8]
 
