@@ -169,7 +169,7 @@ class LowImpactResearch:
                 if status != "skipped":
                     checks.append(CheckResult("open_redirect_probe", status, f"Redirect parameter check for {url}", evidence))
 
-        status, evidence = sourcemap_probe(self.client, scripts, self._get)
+        status, evidence = sourcemap_probe(self.client, scripts, base, self._get)
         checks.append(CheckResult("sourcemap_probe", status, status.replace("_", " "), evidence))
 
         status, evidence = api_spec_probe(base, self._get)
