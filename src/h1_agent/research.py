@@ -12,6 +12,7 @@ from .graphql import discover_graphql_endpoints, introspection_probe
 from .idor import ObjectAuthorizationTester
 from .session_mapper import AuthenticatedSessionMapper
 from .websocket import discover_websocket_urls, websocket_handshake_probe
+from .workflow import evidence_summary, run_stateful_get_workflow
 from .cloud import analyze_cloud_text
 from .attack_surface import (
     discover_from_html,
@@ -304,6 +305,20 @@ class LowImpactResearch:
                 surface_evidence(deduped_openapi),
             ))
 
+            workflow_steps, workflow_evidence = run_stateful_get_workflow(
+                self.client,
+                deduped_openapi,
+                base,
+                self.scopes,
+                max_steps=min(self.settings.authz_max_endpoints, 20),
+            )
+            checks.append(CheckResult(
+                "stateful_api_workflow",
+                "found" if workflow_steps else "empty",
+                f"{len(workflow_steps)} read-only API workflow steps exercised",
+                workflow_evidence + evidence_summary(workflow_steps),
+            ))
+
         graphql_urls = discover_graphql_endpoints([endpoint.url for endpoint in unique_surface], self.scopes)
         for graphql_url in graphql_urls:
             status, evidence = introspection_probe(self.client, graphql_url, self.scopes)
@@ -314,7 +329,8 @@ class LowImpactResearch:
             status, evidence = websocket_handshake_probe(self.client, websocket_url, self.scopes)
             checks.append(CheckResult("websocket_handshake", status, f"WebSocket endpoint check for {websocket_url}", evidence))
 
-        cloud_result, cloud_evidence = analyze_cloud_text(html, base)
+        cloud_text = html + "\n" + "\n".join(text for _url, text in script_texts)
+        cloud_result, cloud_evidence = analyze_cloud_text(cloud_text, base)
         if cloud_result["aws_arns"] or cloud_result["azure_storage_urls"] or cloud_result["gcp_storage_hosts"] or cloud_result["policy_observations"]:
             checks.append(CheckResult("cloud_iam_analysis", "review", "Cloud footprint and policy indicators discovered", cloud_evidence))
 
