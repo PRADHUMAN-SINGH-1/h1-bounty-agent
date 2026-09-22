@@ -111,6 +111,7 @@ def _maybe_auto_submit(
     reproduction: list,
     evidence_json: list[dict],
     asset,
+    scopes,
     metadata: dict,
 ) -> dict | None:
     if not settings.auto_submit_findings:
@@ -125,8 +126,8 @@ def _maybe_auto_submit(
         return {"status": "blocked", "reason": "insufficient reproduction/evidence"}
     if metadata.get("missing_validation"):
         return {"status": "blocked", "reason": "finding still requires validation"}
-    ok, scoped_asset, reason = target_is_in_scope(target, api.normalized_scopes_cache.get(handle, [])) if hasattr(api, "normalized_scopes_cache") else (True, asset, "")
-    if not ok or scoped_asset is None:
+    ok, scoped_asset, reason = target_is_in_scope(target, scopes)
+    if not ok or scoped_asset is None or not scoped_asset.eligible_for_submission:
         return {"status": "blocked", "reason": f"scope validation failed: {reason}"}
     finding = Finding(
         program_handle=handle,
@@ -137,7 +138,7 @@ def _maybe_auto_submit(
         summary=summary,
         impact=impact,
         reproduction=reproduction,
-        evidence=[],
+        evidence=[Evidence(**item) for item in evidence_json],
         structured_scope_id=asset.id,
         weakness_id=metadata.get("weakness_id"),
         metadata=metadata,
@@ -477,6 +478,31 @@ def _research_program(
                 "confidence": confidence,
             }
         )
+
+        if settings.auto_submit_findings:
+            try:
+                auto_result = _maybe_auto_submit(
+                    settings,
+                    api,
+                    store,
+                    finding_id,
+                    handle,
+                    target,
+                    draft.get("title", ""),
+                    draft.get("severity"),
+                    draft.get("summary", ""),
+                    draft.get("impact", ""),
+                    draft.get("reproduction", []),
+                    evidence_json,
+                    asset,
+                    scopes,
+                    metadata,
+                )
+                result["findings"][-1]["auto_submission"] = auto_result
+            except HackerOneAPIError as exc:
+                result["skipped"].append(f"{target}: automatic submission failed: {exc}")
+            except Exception as exc:
+                result["skipped"].append(f"{target}: automatic submission blocked: {exc}")
 
     return result
 
