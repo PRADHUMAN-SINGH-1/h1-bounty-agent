@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "h1-bounty-agent"
-version = "0.3.0"
+version = "0.4.0"
 description = "AI-assisted HackerOne research workspace with strict authorization and human validation gates"
 requires-python = ">=3.11"
 dependencies = [
@@ -12,6 +12,7 @@ dependencies = [
   "httpx>=0.27,<1",
   "pydantic>=2.7,<3",
   "python-dotenv>=1.0,<2",
+  "vercel>=1,<2",
 ]
 
 [project.optional-dependencies]
