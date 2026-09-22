@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-import sqlite3
+import os
+import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -14,18 +16,22 @@ def utc_now() -> str:
 
 
 class Store:
-    """Request-scoped local store.
+    """Small request-safe JSON state store.
 
-    Vercel Functions have ephemeral filesystems, so this store is intentionally
-    used as a runtime queue/cache, not as the source of durable history.
-    Durable cloud storage is a separate later layer.
+    On Vercel this lives in /tmp and is therefore ephemeral. It is deliberately
+    dependency-free so the serverless API path remains reliable.
     """
 
     def __init__(self, settings: Settings):
-        self.settings = settings
-        self.path = Path(settings.database_path)
+        base = Path(settings.database_path)
+        self.path = base.with_suffix(".json")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._migrate()
+        if not self.path.exists():
+            self._write({
+                "programs": {},
+                "scopes": {},
+                "findings": {},
+            })
 
     @property
     def durable(self) -> bool:
@@ -34,153 +40,109 @@ class Store:
     def close(self) -> None:
         return None
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _read(self) -> dict[str, Any]:
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {"programs": {}, "scopes": {}, "findings": {}}
 
-    def _migrate(self) -> None:
-        with self._connect() as conn:
-            conn.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS programs (
-                    handle TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    raw_json TEXT NOT NULL,
-                    fetched_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS scopes (
-                    program_handle TEXT NOT NULL,
-                    scope_id TEXT,
-                    asset_type TEXT NOT NULL,
-                    asset_identifier TEXT NOT NULL,
-                    eligible_for_bounty INTEGER NOT NULL,
-                    eligible_for_submission INTEGER NOT NULL,
-                    instruction TEXT NOT NULL,
-                    raw_json TEXT NOT NULL,
-                    fetched_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS findings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    program_handle TEXT NOT NULL,
-                    target TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    severity TEXT,
-                    state TEXT NOT NULL,
-                    summary TEXT NOT NULL DEFAULT '',
-                    impact TEXT NOT NULL DEFAULT '',
-                    reproduction_json TEXT NOT NULL DEFAULT '[]',
-                    evidence_json TEXT NOT NULL,
-                    structured_scope_id TEXT,
-                    weakness_id INTEGER,
-                    report_json TEXT,
-                    created_at TEXT NOT NULL,
-                    approved_at TEXT,
-                    submitted_at TEXT,
-                    h1_report_id TEXT
-                );
-                """
-            )
+    def _write(self, state: dict[str, Any]) -> None:
+        fd, tmp = tempfile.mkstemp(
+            dir=str(self.path.parent),
+            prefix=".h1-state-",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(state, handle, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, self.path)
+        finally:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
 
     def save_program(self, payload: dict[str, Any]) -> None:
         attrs = payload.get("data", {}).get("attributes", {})
         handle = attrs.get("handle")
         if not handle:
             return
-        with self._connect() as conn:
-            conn.execute(
-                "INSERT OR REPLACE INTO programs(handle,name,raw_json,fetched_at) VALUES(?,?,?,?)",
-                (
-                    handle,
-                    attrs.get("name", handle),
-                    json.dumps(payload),
-                    utc_now(),
-                ),
-            )
+        state = self._read()
+        state["programs"][handle] = {
+            "name": attrs.get("name", handle),
+            "raw_json": payload,
+            "fetched_at": utc_now(),
+        }
+        self._write(state)
 
     def save_scopes(self, handle: str, payload: dict[str, Any]) -> None:
-        with self._connect() as conn:
-            conn.execute("DELETE FROM scopes WHERE program_handle=?", (handle,))
-            for item in payload.get("data", []):
-                attrs = item.get("attributes", {})
-                conn.execute(
-                    """INSERT INTO scopes(program_handle,scope_id,asset_type,asset_identifier,
-                    eligible_for_bounty,eligible_for_submission,instruction,raw_json,fetched_at)
-                    VALUES(?,?,?,?,?,?,?,?,?)""",
-                    (
-                        handle,
-                        item.get("id"),
-                        attrs.get("asset_type", ""),
-                        attrs.get("asset_identifier", ""),
-                        int(bool(attrs.get("eligible_for_bounty", False))),
-                        int(bool(attrs.get("eligible_for_submission", True))),
-                        str(attrs.get("instruction") or ""),
-                        json.dumps(item),
-                        utc_now(),
-                    ),
-                )
+        state = self._read()
+        state["scopes"][handle] = {
+            "raw_json": payload,
+            "fetched_at": utc_now(),
+        }
+        self._write(state)
 
     def create_finding(self, data: dict[str, Any]) -> int:
-        with self._connect() as conn:
-            cur = conn.execute(
-                """INSERT INTO findings(program_handle,target,title,severity,state,summary,impact,
-                reproduction_json,evidence_json,structured_scope_id,weakness_id,created_at)
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (
-                    data["program_handle"],
-                    data["target"],
-                    data["title"],
-                    data.get("severity"),
-                    data.get("state", "needs_review"),
-                    data.get("summary", ""),
-                    data.get("impact", ""),
-                    json.dumps(data.get("reproduction", [])),
-                    json.dumps(data.get("evidence", [])),
-                    data.get("structured_scope_id"),
-                    data.get("weakness_id"),
-                    utc_now(),
-                ),
-            )
-            return int(cur.lastrowid)
+        state = self._read()
+        existing_ids = [int(x) for x in state["findings"].keys() if str(x).isdigit()]
+        finding_id = max(existing_ids, default=0) + 1
+        record = {
+            "id": finding_id,
+            "program_handle": data["program_handle"],
+            "target": data["target"],
+            "title": data.get("title", ""),
+            "severity": data.get("severity"),
+            "state": data.get("state", "needs_review"),
+            "summary": data.get("summary", ""),
+            "impact": data.get("impact", ""),
+            "reproduction": data.get("reproduction", []),
+            "evidence": data.get("evidence", []),
+            "structured_scope_id": data.get("structured_scope_id"),
+            "weakness_id": data.get("weakness_id"),
+            "report_json": None,
+            "created_at": utc_now(),
+            "approved_at": None,
+            "submitted_at": None,
+            "h1_report_id": None,
+        }
+        state["findings"][str(finding_id)] = record
+        self._write(state)
+        return finding_id
 
     def get_finding(self, finding_id: int) -> dict[str, Any]:
-        with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM findings WHERE id=?",
-                (finding_id,),
-            ).fetchone()
-        if not row:
+        state = self._read()
+        record = state["findings"].get(str(finding_id))
+        if record is None:
             raise KeyError(f"Finding {finding_id} not found")
-        data = dict(row)
-        data["reproduction"] = json.loads(data.pop("reproduction_json") or "[]")
-        data["evidence"] = json.loads(data.pop("evidence_json") or "[]")
-        return data
+        return dict(record)
 
-    def set_state(self, finding_id: int, state: str) -> None:
-        with self._connect() as conn:
-            if state == "approved":
-                conn.execute(
-                    "UPDATE findings SET state=?, approved_at=? WHERE id=?",
-                    (state, utc_now(), finding_id),
-                )
-            else:
-                conn.execute(
-                    "UPDATE findings SET state=? WHERE id=?",
-                    (state, finding_id),
-                )
+    def set_state(self, finding_id: int, state_name: str) -> None:
+        state = self._read()
+        record = state["findings"].get(str(finding_id))
+        if record is None:
+            raise KeyError(f"Finding {finding_id} not found")
+        record["state"] = state_name
+        if state_name == "approved":
+            record["approved_at"] = utc_now()
+        state["findings"][str(finding_id)] = record
+        self._write(state)
 
     def mark_submitted(self, finding_id: int, payload: dict[str, Any]) -> None:
-        report_id = str(payload.get("data", {}).get("id") or "")
-        with self._connect() as conn:
-            conn.execute(
-                "UPDATE findings SET state='submitted', report_json=?, submitted_at=?, h1_report_id=? WHERE id=?",
-                (json.dumps(payload), utc_now(), report_id, finding_id),
-            )
+        state = self._read()
+        record = state["findings"].get(str(finding_id))
+        if record is None:
+            raise KeyError(f"Finding {finding_id} not found")
+        record["state"] = "submitted"
+        record["report_json"] = payload
+        record["submitted_at"] = utc_now()
+        record["h1_report_id"] = str(payload.get("data", {}).get("id") or "")
+        state["findings"][str(finding_id)] = record
+        self._write(state)
 
     def list_findings(self) -> list[dict[str, Any]]:
-        with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT id,program_handle,target,title,severity,state,h1_report_id,created_at "
-                "FROM findings ORDER BY id DESC"
-            ).fetchall()
-        return [dict(row) for row in rows]
+        state = self._read()
+        rows = list(state["findings"].values())
+        return sorted(rows, key=lambda row: int(row.get("id", 0)), reverse=True)
