@@ -7,6 +7,12 @@ from urllib.parse import urljoin
 import httpx
 
 from .authorization import AuthorizationDifferentialTester, evidence_from_results
+from .chains import build_candidate_chains
+from .graphql import discover_graphql_endpoints, introspection_probe
+from .idor import ObjectAuthorizationTester
+from .session_mapper import AuthenticatedSessionMapper
+from .websocket import discover_websocket_urls, websocket_handshake_probe
+from .cloud import analyze_cloud_text
 from .attack_surface import (
     discover_from_html,
     discover_from_javascript,
@@ -203,6 +209,24 @@ class LowImpactResearch:
             surface_evidence(unique_surface),
         ))
 
+        if self.settings.authz_header_a:
+            try:
+                mapper = AuthenticatedSessionMapper(
+                    self.client,
+                    self.settings.authz_header_a,
+                    self.settings.session_map_max_pages,
+                    self.settings.session_map_max_depth,
+                )
+                pages, auth_evidence = mapper.crawl(base, self.scopes)
+                checks.append(CheckResult(
+                    "authenticated_workflow_map",
+                    "found" if pages else "empty",
+                    f"{len(pages)} authenticated read-only pages mapped",
+                    auth_evidence,
+                ))
+            except ValueError as exc:
+                checks.append(CheckResult("authenticated_workflow_map", "error", str(exc), []))
+
         status, evidence = cors_probe(self.client, base, self._get)
         checks.append(CheckResult("cors_probe", status, status.replace("_", " "), evidence))
 
@@ -280,6 +304,20 @@ class LowImpactResearch:
                 surface_evidence(deduped_openapi),
             ))
 
+        graphql_urls = discover_graphql_endpoints([endpoint.url for endpoint in unique_surface], self.scopes)
+        for graphql_url in graphql_urls:
+            status, evidence = introspection_probe(self.client, graphql_url, self.scopes)
+            checks.append(CheckResult("graphql_introspection", status, f"GraphQL schema read for {graphql_url}", evidence))
+
+        websocket_urls = discover_websocket_urls(home_response.text[:2_000_000], base, self.scopes)
+        for websocket_url in websocket_urls:
+            status, evidence = websocket_handshake_probe(self.client, websocket_url, self.scopes)
+            checks.append(CheckResult("websocket_handshake", status, f"WebSocket endpoint check for {websocket_url}", evidence))
+
+        cloud_result, cloud_evidence = analyze_cloud_text(html, base)
+        if cloud_result["aws_arns"] or cloud_result["azure_storage_urls"] or cloud_result["gcp_storage_hosts"] or cloud_result["policy_observations"]:
+            checks.append(CheckResult("cloud_iam_analysis", "review", "Cloud footprint and policy indicators discovered", cloud_evidence))
+
         if self.settings.allow_authz_tests and self.settings.authz_header_a and self.settings.authz_header_b:
             authz_urls = [
                 endpoint.url
@@ -314,8 +352,39 @@ class LowImpactResearch:
                     [Evidence("authorization_config_error", str(exc), base)],
                 ))
 
+            try:
+                object_tester = ObjectAuthorizationTester(
+                    self.client,
+                    self.settings.authz_header_a,
+                    self.settings.authz_header_b,
+                    self.settings.authz_max_endpoints,
+                )
+                observations, object_evidence = object_tester.run(authz_urls, self.scopes)
+                checks.append(CheckResult(
+                    "idor_bola_differential",
+                    "review" if any(item.suspicious for item in observations) else "observed",
+                    "Read-only object identifier substitution against the second test account",
+                    object_evidence,
+                ))
+            except ValueError as exc:
+                checks.append(CheckResult("idor_bola_differential", "error", str(exc), []))
+
         status, evidence = mixed_content_probe(base, html)
         checks.append(CheckResult("mixed_content_probe", status, status.replace("_", " "), evidence))
+
+        chain_evidence = flatten(checks)
+        chains = build_candidate_chains(chain_evidence)
+        checks.append(
+            CheckResult(
+                "attack_chain_analysis",
+                "found" if any(item.stages for item in chains) else "empty",
+                "; ".join(item.name for item in chains),
+                [
+                    Evidence("attack_chain", f"{item.name}: {' -> '.join(item.stages)}; {item.rationale}", base)
+                    for item in chains
+                ],
+            )
+        )
 
         return checks
 
