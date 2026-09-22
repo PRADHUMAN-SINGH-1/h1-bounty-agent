@@ -46,7 +46,7 @@ class LowImpactResearch:
         self.scopes = scopes
         self.last_request = 0.0
         self.client = httpx.Client(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=12,
             headers={"User-Agent": settings.user_agent},
         )
