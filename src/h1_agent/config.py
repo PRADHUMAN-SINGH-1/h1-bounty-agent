@@ -92,6 +92,17 @@ class Settings:
         _int("AUTONOMOUS_MAX_TARGETS_PER_PROGRAM", 2),
         1,
     )
+    full_research_max_targets_per_program: int = max(
+        _int("FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM", 50),
+        1,
+    )
+    deep_max_scripts: int = max(_int("DEEP_MAX_SCRIPTS", 30), 1)
+    deep_max_query_links: int = max(_int("DEEP_MAX_QUERY_LINKS", 20), 1)
+    deep_max_api_candidates: int = max(_int("DEEP_MAX_API_CANDIDATES", 30), 1)
+    deep_max_openapi_steps: int = max(_int("DEEP_MAX_OPENAPI_STEPS", 30), 1)
+    deep_max_graphql_endpoints: int = max(_int("DEEP_MAX_GRAPHQL_ENDPOINTS", 10), 1)
+    deep_max_websocket_endpoints: int = max(_int("DEEP_MAX_WEBSOCKET_ENDPOINTS", 10), 1)
+    deep_max_cloud_text_bytes: int = max(_int("DEEP_MAX_CLOUD_TEXT_BYTES", 4_000_000), 100_000)
     research_program_allowlist: tuple[str, ...] = _csv("RESEARCH_PROGRAM_ALLOWLIST")
 
     blob_token: str = _raw("BLOB_READ_WRITE_TOKEN")

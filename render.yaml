@@ -58,6 +58,22 @@ services:
         value: "3"
       - key: AUTONOMOUS_MAX_TARGETS_PER_PROGRAM
         value: "2"
+      - key: FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM
+        value: "50"
+      - key: DEEP_MAX_SCRIPTS
+        value: "30"
+      - key: DEEP_MAX_QUERY_LINKS
+        value: "20"
+      - key: DEEP_MAX_API_CANDIDATES
+        value: "30"
+      - key: DEEP_MAX_OPENAPI_STEPS
+        value: "30"
+      - key: DEEP_MAX_GRAPHQL_ENDPOINTS
+        value: "10"
+      - key: DEEP_MAX_WEBSOCKET_ENDPOINTS
+        value: "10"
+      - key: DEEP_MAX_CLOUD_TEXT_BYTES
+        value: "4000000"
       - key: RESEARCH_PROGRAM_ALLOWLIST
         value: ""
 

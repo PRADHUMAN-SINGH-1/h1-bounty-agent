@@ -28,17 +28,30 @@ def _target_for_asset(asset) -> str | None:
     return None
 
 
-def _select_targets(scopes, max_targets: int):
+def _select_targets(scopes, max_targets: int, *, exhaustive: bool = False):
+    seen: set[str] = set()
     targets = []
-    for asset in scopes:
+    ordered = sorted(
+        scopes,
+        key=lambda asset: (
+            0 if asset.eligible_for_bounty else 1,
+            0 if str(asset.asset_type).upper() == "URL" else 1,
+            str(asset.asset_identifier).lower(),
+        ),
+    )
+    for asset in ordered:
         if not asset.eligible_for_submission or not asset.eligible_for_bounty:
             continue
         if asset.instruction:
             continue
         target = _target_for_asset(asset)
-        if target:
-            targets.append((asset, target))
-        if len(targets) >= max_targets:
+        if not target or target in seen:
+            continue
+        seen.add(target)
+        targets.append((asset, target))
+        if not exhaustive and len(targets) >= max_targets:
+            break
+        if exhaustive and len(targets) >= max_targets:
             break
     return targets
 
@@ -52,6 +65,7 @@ def _research_program(
     *,
     active: bool = False,
     deep: bool = False,
+    on_progress=None,
 ) -> dict:
     result = {
         "program": handle,
@@ -68,7 +82,10 @@ def _research_program(
     scopes = normalize_scopes(scopes_payload)
     store.save_scopes(handle, scopes_payload)
 
-    targets = _select_targets(scopes, max_targets)
+    exhaustive = deep and not active
+    targets = _select_targets(scopes, max_targets, exhaustive=exhaustive)
+    if on_progress:
+        on_progress({"program": handle, "target": None, "planned_targets": len(targets), "completed_targets": 0})
     if not targets:
         result["status"] = "blocked"
         result["skipped"].append("No eligible structured-scope URL/domain assets without program-specific instructions.")
@@ -77,7 +94,14 @@ def _research_program(
     llm = LLMClient(settings)
     llm_available = llm.available()
 
-    for asset, target in targets:
+    for index, (asset, target) in enumerate(targets, start=1):
+        if on_progress:
+            on_progress({
+                "program": handle,
+                "target": target,
+                "planned_targets": len(targets),
+                "completed_targets": index - 1,
+            })
         existing = store.list_findings()
         if any(
             row.get("program_handle") == handle
@@ -99,6 +123,14 @@ def _research_program(
 
         result["targets_checked"] += 1
         evidence = flatten(evidence_results)
+        if on_progress:
+            on_progress({
+                "program": handle,
+                "target": target,
+                "planned_targets": len(targets),
+                "completed_targets": index,
+                "evidence_collected": len(evidence),
+            })
 
         current_surface = sorted({
             item.source
@@ -278,6 +310,7 @@ def run_cycle(
     requested_programs: set[str] | None = None,
     active: bool = False,
     mode: str = "",
+    on_progress=None,
 ) -> dict:
     summary = {
         "status": "ok",

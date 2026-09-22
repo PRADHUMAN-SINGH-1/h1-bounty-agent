@@ -189,23 +189,52 @@ function renderPrograms(programs){
 
 async function runFullResearch(handle){
   const status=document.getElementById("researchStatus");
-  status.textContent="Starting full research for "+handle+"…";
+  status.textContent="Queueing deep research for "+handle+"…";
   status.className="muted";
   document.querySelectorAll("[data-full-research-handle]").forEach(function(btn){btn.disabled=true;});
 
   try{
-    const d=await request("/api/worker",{
+    const queued=await request("/api/research/jobs",{
       method:"POST",
       body:JSON.stringify({programs:[handle],mode:"full"})
     });
-    renderResult(d);
-    await load();
+    status.textContent="Job "+queued.job_id+" queued. Research is running in the background…";
+    await pollResearchJob(queued.job_id);
   }catch(e){
-    status.textContent="Full research failed: "+e.message;
+    status.textContent="Full research could not start: "+e.message;
     status.className="err";
     alert(e.message);
   }finally{
     document.querySelectorAll("[data-full-research-handle]").forEach(function(btn){btn.disabled=false;});
+  }
+}
+
+async function pollResearchJob(jobId){
+  const status=document.getElementById("researchStatus");
+  for(;;){
+    const job=await request("/api/research/jobs/"+encodeURIComponent(jobId));
+    const p=job.progress||{};
+    const pct=p.planned_targets ? Math.floor((100*p.completed_targets)/p.planned_targets) : 0;
+    if(job.status==="queued"){
+      status.textContent="Job "+jobId+" queued…";
+    }else if(job.status==="running"){
+      status.textContent=[
+        "Deep research running",
+        "Job: "+jobId,
+        "Program: "+(p.program||"—"),
+        "Target: "+(p.target||"—"),
+        "Progress: "+(p.completed_targets||0)+"/"+(p.planned_targets||"—")+" targets ("+pct+"%)",
+        "Evidence collected on last target: "+(p.evidence_collected||0)
+      ].join("\n");
+    }else if(job.status==="completed"){
+      renderResult(job.result||{status:"ok"});
+      return;
+    }else if(job.status==="error"){
+      status.textContent="Deep research job failed: "+(job.error||"Unknown error");
+      status.className="err";
+      return;
+    }
+    await new Promise(function(resolve){setTimeout(resolve,3000);});
   }
 }
 
