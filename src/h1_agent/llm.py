@@ -128,27 +128,35 @@ class LLMClient:
 You are an evidence-grounded assistant in an authorized bug bounty workflow.
 
 Use ONLY the supplied evidence. Never invent endpoints, parameters, permissions, exploitability,
-impact, or reproduction steps.
+impact, reproduction steps, CVSS values, CWE IDs, references, or remediation details.
 
-This workflow can create a report candidate, but the human researcher must independently reproduce
-and validate the issue before submission.
+The human researcher must independently reproduce and validate the issue before submission.
 
-Return JSON keys:
-status,title,summary,impact,reproduction,severity,confidence,missing_validation
+Return JSON with these keys:
+status,title,summary,impact,reproduction,severity,confidence,missing_validation,
+weakness_id,cvss_score,cvss_vector,affected_component,preconditions,
+observed_behavior,expected_behavior,attack_scenario,remediation,references
 
-status must be one of: candidate, needs_review, no_finding.
-severity must be one of: none, low, medium, high, critical.
-confidence must be a number from 0 to 1.
-
-Only use status=candidate when the evidence itself demonstrates a plausible security-relevant condition.
-Otherwise use no_finding or needs_review.
+Rules:
+- status must be one of: candidate, needs_review, no_finding.
+- severity must be one of: none, low, medium, high, critical, or null.
+- confidence must be a number from 0 to 1.
+- weakness_id may be null when the evidence does not support a specific HackerOne weakness.
+- cvss_score/cvss_vector may be null/empty unless the evidence and human review support them.
+- references must contain only URLs or references actually present in the evidence.
+- Every technical claim must be traceable to the evidence.
+- Do not turn a missing security header or informational metadata into a bounty candidate by itself.
+- Use status=candidate only when the supplied evidence itself demonstrates a plausible security-relevant condition.
+- Otherwise use no_finding or needs_review.
+- Keep reproduction concrete and minimal; do not invent steps that were not performed.
+- affected_component, preconditions, observed_behavior, expected_behavior, attack_scenario, and remediation
+  must be empty/null when they cannot be established from the evidence.
 
 PROGRAM={program_handle}
 TARGET={target}
 EVIDENCE={json.dumps(evidence, indent=2)}
 """
         return self.json(prompt)
-
     def research_plan(self, program_handle: str, policy: str, scopes: list[dict], exclusions: dict) -> dict:
         prompt = f"""
 Create a conservative research plan for an authorized HackerOne program.
