@@ -72,7 +72,6 @@ class Store:
         rows: list[dict[str, Any]] = []
         for item in self.blob.iter_objects(
             prefix=prefix,
-            mode="folded",
             limit=1000,
             token=self.settings.blob_token,
         ):
