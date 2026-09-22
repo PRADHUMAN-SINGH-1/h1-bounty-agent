@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
+browser = ["playwright>=1.50,<2"]
 
 [project.scripts]
 h1-agent = "h1_agent.cli:main"

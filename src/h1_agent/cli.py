@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from .config import Settings
 from .discovery import rank
@@ -10,6 +11,11 @@ from .llm import LLMClient
 from .models import Evidence, Finding
 from .mobile import analyze_mobile_package
 from .cloud import analyze_cloud_text
+from .browser_trace import browser_model_json, load_har
+from .browser_automation import AuthorizedBrowserMapper
+from .business_logic import build_workflow_model, model_evidence
+from .hypotheses import generate_hypotheses
+
 from .reporting import markdown_report
 from .research import LowImpactResearch, flatten
 from .scope import normalize_scopes, target_is_in_scope
@@ -50,6 +56,19 @@ def main() -> None:
     cloud = sub.add_parser("cloud-analyze", help="Analyze a text/JSON/IAM policy file for cloud footprint and policy indicators")
     cloud.add_argument("path")
 
+    browser = sub.add_parser("browser-analyze", help="Analyze an authorized browser HAR trace and build a session/workflow model")
+    browser.add_argument("handle")
+    browser.add_argument("path")
+
+    crawl = sub.add_parser("browser-crawl", help="Run an authorized local Playwright read-only crawl")
+    crawl.add_argument("handle")
+    crawl.add_argument("target")
+    crawl.add_argument("--storage-state", default=None)
+    crawl.add_argument("--max-pages", type=int, default=20)
+
+    business = sub.add_parser("business-model", help="Build a business-logic model from a JSON request trace")
+    business.add_argument("path")
+
     sub.add_parser("capabilities", help="Show implemented research capabilities")
 
     sub.add_parser("findings", help="List candidate findings")
@@ -86,6 +105,56 @@ def main() -> None:
         ]
         for item in capabilities:
             print("[OK] " + item)
+        return
+
+    if args.command == "browser-crawl":
+        api = HackerOneClient(settings)
+        try:
+            scopes = normalize_scopes(api.structured_scopes(args.handle))
+        finally:
+            api.close()
+        mapper = AuthorizedBrowserMapper(scopes, max_pages=args.max_pages)
+        result, evidence = mapper.crawl(args.target, storage_state=args.storage_state)
+        print(json.dumps({
+            "pages": result.pages,
+            "requests": result.requests,
+            "storage_origins": result.storage_origins,
+            "evidence": [item.__dict__ for item in evidence],
+        }, indent=2))
+        return
+
+    if args.command == "browser-analyze":
+        api = HackerOneClient(settings)
+        try:
+            scopes = normalize_scopes(api.structured_scopes(args.handle))
+        finally:
+            api.close()
+        model, evidence = load_har(args.path, scopes)
+        print(json.dumps({
+            "model": browser_model_json(model),
+            "business_model": {
+                "objects": [item.__dict__ for item in build_workflow_model([
+                    {"method": item.method, "url": item.url, "status": item.status, "source": item.source}
+                    for item in model.requests
+                ]).objects]
+            },
+            "evidence": [item.__dict__ for item in evidence],
+        }, indent=2))
+        return
+
+    if args.command == "business-model":
+        payload = json.loads(Path(args.path).read_text(encoding="utf-8"))
+        if not isinstance(payload, list):
+            raise SystemExit("business-model expects a JSON array of request objects.")
+        model = build_workflow_model(payload)
+        hypotheses = generate_hypotheses(model_evidence(model))
+        print(json.dumps({
+            "objects": [item.__dict__ for item in model.objects],
+            "nodes": [item.__dict__ for item in model.nodes],
+            "edges": [item.__dict__ for item in model.edges],
+            "invariants": [item.__dict__ for item in model.invariants],
+            "hypotheses": [item.__dict__ for item in hypotheses],
+        }, indent=2))
         return
 
     if args.command == "mobile-analyze":

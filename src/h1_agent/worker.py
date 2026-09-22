@@ -9,6 +9,9 @@ from .llm import LLMClient
 from .research import LowImpactResearch, flatten
 from .scope import normalize_scopes
 from .store import Store
+from .models import Evidence
+from .recon_diff import compare_surfaces
+from .research_memory import make_memory
 
 
 def _target_for_asset(asset) -> str | None:
@@ -93,6 +96,45 @@ def _research_program(
 
         result["targets_checked"] += 1
         evidence = flatten(evidence_results)
+
+        current_surface = sorted({
+            item.source
+            for item in evidence
+            if item.name == "attack_surface_endpoint" and item.source.startswith(("http://", "https://"))
+        })
+        snapshot = store.save_surface_snapshot(f"{handle}:{target}", current_surface)
+        delta = compare_surfaces(snapshot["previous"], snapshot["current"])
+        if delta.added:
+            evidence.append(
+                Evidence(
+                    "surface_delta_added",
+                    f"New attack-surface items since last research: {', '.join(delta.added[:50])}",
+                    target,
+                )
+            )
+        if delta.removed:
+            evidence.append(
+                Evidence(
+                    "surface_delta_removed",
+                    f"Removed attack-surface items since last research: {', '.join(delta.removed[:50])}",
+                    target,
+                )
+            )
+
+        memory_items = [
+            make_memory(
+                f"{target}:research-mode",
+                "active" if active else "passive",
+                "worker",
+            ).__dict__,
+            make_memory(
+                f"{target}:surface-count",
+                str(len(current_surface)),
+                "worker",
+            ).__dict__,
+        ]
+        store.save_memory(f"{handle}:{target}", memory_items)
+
         evidence_json = [item.__dict__ for item in evidence]
 
         if not llm_available:

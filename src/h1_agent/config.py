@@ -81,6 +81,9 @@ class Settings:
     authz_max_endpoints: int = max(_int("AUTHZ_MAX_ENDPOINTS", 12), 1)
     session_map_max_pages: int = max(_int("SESSION_MAP_MAX_PAGES", 40), 1)
     session_map_max_depth: int = max(_int("SESSION_MAP_MAX_DEPTH", 2), 0)
+    allow_state_changing_tests: bool = _bool("ALLOW_STATE_CHANGING_TESTS", False)
+    mutation_max_requests: int = max(_int("MUTATION_MAX_REQUESTS", 3), 1)
+    browser_trace_max_requests: int = max(_int("BROWSER_TRACE_MAX_REQUESTS", 500), 1)
 
     autonomous_research: bool = _bool("AUTONOMOUS_RESEARCH", False)
     autonomous_passive_research: bool = _bool("AUTONOMOUS_PASSIVE_RESEARCH", False)

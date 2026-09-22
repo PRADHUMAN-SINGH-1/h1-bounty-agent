@@ -52,6 +52,14 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Mobile APK/IPA static surface analysis
 - Cloud/IAM footprint and policy analysis
 - Attack-chain correlation
+- Deep business-logic and workflow-state modeling
+- Authorized browser/HAR session trace analysis
+- Object ownership and tenant-isolation modeling
+- Role / privilege graph inference
+- State-change mutation planning with explicit execution gate
+- Attack hypothesis generation and evidence-driven test planning
+- Recon surface change detection
+- Persistent research memory
 - Human review and approval gate
 - Explicit submission gate
 - Vercel Python/ASGI entrypoints
@@ -211,6 +219,17 @@ h1-agent capabilities
 ```
 
 Two-account authorization testing requires `ALLOW_AUTHZ_TESTS=true` plus two test-account headers. The tool performs read-only differential checks and still requires human reproduction before a report can be approved.
+
+State-changing validation is separately gated by `ALLOW_STATE_CHANGING_TESTS=true` and should only be enabled for a program that explicitly permits the specific operation. The default behavior is to generate mutation plans without executing them.
+
+Authorized browser traces can be analyzed locally:
+
+```bash
+h1-agent browser-analyze <handle> ./authorized-session.har
+h1-agent business-model ./request-trace.json
+```
+
+The browser trace analyzer is scope-gated and is intended for exported, authorized traffic. It does not log in, submit forms, or obtain credentials itself.
 
 ## Human validation
 
