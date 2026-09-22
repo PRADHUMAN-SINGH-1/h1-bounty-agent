@@ -2,33 +2,35 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-@dataclass
-class FindingDraft:
-    title: str
-    asset: str
-    evidence: str
-    impact: str
-    reproduction: str
-    confidence: float
-    human_validated: bool = False
+from .models import Finding
 
-class HumanValidationGate:
-    """A finding cannot become submission-ready until the operator validates it."""
-    REQUIRED_CHECKS = (
-        "reproduced_the_behavior",
-        "confirmed_asset_is_in_scope",
-        "confirmed_impact",
-        "confirmed_evidence_is_accurate",
-        "checked_program_specific_rules",
-    )
 
-    def validate(self, finding: FindingDraft, checks: set[str]) -> FindingDraft:
-        missing = set(self.REQUIRED_CHECKS) - checks
-        if missing:
-            raise ValueError(f"Human validation incomplete: {', '.join(sorted(missing))}")
-        finding.human_validated = True
-        return finding
+@dataclass(frozen=True)
+class ValidationResult:
+    ok: bool
+    blockers: list[str]
 
-    def require_validated(self, finding: FindingDraft) -> None:
-        if not finding.human_validated:
-            raise PermissionError("Submission blocked: human validation is required")
+
+def validate_finding(finding: Finding) -> ValidationResult:
+    blockers: list[str] = []
+    if not finding.title.strip():
+        blockers.append("missing title")
+    if not finding.summary.strip():
+        blockers.append("missing summary")
+    if not finding.impact.strip():
+        blockers.append("missing impact")
+    if not finding.reproduction:
+        blockers.append("missing reproduction steps")
+    if not finding.evidence:
+        blockers.append("missing evidence")
+    if finding.state not in {"draft", "needs_review", "approved"}:
+        blockers.append(f"invalid state: {finding.state}")
+    return ValidationResult(not blockers, blockers)
+
+
+def require_human_approval(finding: Finding) -> None:
+    result = validate_finding(finding)
+    if not result.ok:
+        raise ValueError("Finding is incomplete: " + "; ".join(result.blockers))
+    if finding.state != "approved":
+        raise PermissionError("Submission blocked: explicit human approval is required")
