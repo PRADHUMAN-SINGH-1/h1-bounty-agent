@@ -172,12 +172,32 @@ def _items(value) -> tuple[str, ...]:
 
 def relevant_patterns(evidence: list[Evidence], limit: int = 12) -> list[Pattern]:
     names = " ".join(item.name + " " + item.value for item in evidence).lower()
+    evidence_names = {str(item.name).lower() for item in evidence}
     scored = []
+    aliases = {
+        "object-authorization-boundary": {"business_object", "authorization_differential", "idor_observation", "role_anomaly"},
+        "graphql-resolver-authorization": {"graphql_introspection", "graphql_operation"},
+        "credentialed-cors-data-exposure": {"potential_credentialed_cors", "cors_probe"},
+        "ssrf-to-sensitive-boundary": {"ssrf", "server_side_request"},
+        "stored-or-blind-xss-impact-chain": {"xss_sink", "reflected_input"},
+        "business-logic-state-transition": {"business_invariant", "workflow_edge", "state_transition"},
+        "mass-assignment-or-property-injection": {"business_object", "api_parameter"},
+        "race-condition-double-action": {"state_transition", "repeat_request"},
+        "sensitive-data-exposure": {"sensitive_field_names", "potential_sensitive_data_exposure"},
+        "api-key-or-secret-exposure": {"secret_like_assignment", "jwt_like_value", "cloud_key_pattern"},
+        "file-upload-to-code-or-data-impact": {"upload_endpoint", "file_upload"},
+        "cache-key-authentication-confusion": {"cacheable_response", "cache_probe"},
+        "subdomain-takeover-or-dangling-service": {"dangling_dns", "subdomain"},
+        "request-smuggling-boundary": {"request_smuggling", "proxy_boundary"},
+        "path-traversal-file-read": {"path_traversal", "file_read"},
+        "oauth-redirect-or-token-confusion": {"oauth_endpoint", "oauth_redirect"},
+    }
     for pattern in PATTERNS:
         score = 0
         for token in _items(pattern.classes) + _items(pattern.prerequisites) + _items(pattern.strong_signals):
             if str(token).lower() in names:
                 score += 1
+        score += sum(3 for item in aliases.get(pattern.name, set()) if item in evidence_names)
         if score:
             scored.append((score, pattern))
     scored.sort(key=lambda item: (-item[0], item[1].name))
