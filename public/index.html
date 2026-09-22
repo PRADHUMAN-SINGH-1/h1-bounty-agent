@@ -174,63 +174,37 @@ function renderPrograms(programs){
         <span class="badge">score ${p.triage_score}</span>
       </div>
       <div class="actions" style="margin-top:12px">
-        <button class="primary" data-research-handle="${handle}">Research passively</button>
-        <button class="danger" data-assess-handle="${handle}">Deep vulnerability assessment</button>
+        <button class="primary" data-full-research-handle="${handle}">Run Full Research</button>
       </div>
     </div>`;
   }).join("");
 
-  root.querySelectorAll("[data-research-handle]").forEach(function(btn){
+  root.querySelectorAll("[data-full-research-handle]").forEach(function(btn){
     btn.addEventListener("click", function(){
-      researchProgram(btn.getAttribute("data-research-handle"));
-    });
-  });
-  root.querySelectorAll("[data-assess-handle]").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      assessProgram(btn.getAttribute("data-assess-handle"));
+      runFullResearch(btn.getAttribute("data-full-research-handle"));
     });
   });
 }
 
-async function assessProgram(handle){
-  if(!confirm("Confirm you reviewed the current HackerOne program policy, scope, exclusions and testing rules, and explicitly authorize the deeper non-destructive vulnerability assessment for this in-scope program. Continue?")) return;
-
+async function runFullResearch(handle){
   const status=document.getElementById("researchStatus");
-  status.textContent="Starting deep vulnerability assessment for "+handle+"…";
+  status.textContent="Starting full research for "+handle+"…";
   status.className="muted";
-  document.querySelectorAll("[data-research-handle],[data-assess-handle]").forEach(function(btn){btn.disabled=true;});
+  document.querySelectorAll("[data-full-research-handle]").forEach(function(btn){btn.disabled=true;});
 
   try{
-    const d=await request("/api/worker",{method:"POST",body:JSON.stringify({programs:[handle],active:true})});
+    const d=await request("/api/worker",{
+      method:"POST",
+      body:JSON.stringify({programs:[handle],mode:"full"})
+    });
     renderResult(d);
     await load();
   }catch(e){
-    status.textContent="Assessment failed: "+e.message;
+    status.textContent="Full research failed: "+e.message;
     status.className="err";
     alert(e.message);
   }finally{
-    document.querySelectorAll("[data-research-handle],[data-assess-handle]").forEach(function(btn){btn.disabled=false;});
-  }
-}
-
-async function researchProgram(handle){
-  if(!confirm("Confirm you reviewed the current HackerOne program policy and authorize low-impact passive research for this program. Continue?")) return;
-
-  const status=document.getElementById("researchStatus");
-  status.textContent="Starting passive research for "+handle+"…";
-  status.className="muted";
-  document.querySelectorAll("[data-research-handle]").forEach(function(btn){btn.disabled=true;});
-
-  try{
-    const d=await request("/api/worker",{method:"POST",body:JSON.stringify({programs:[handle]})});
-    renderResult(d);
-    await load();
-  }catch(e){
-    status.textContent="Research failed: "+e.message;
-    status.className="err";
-    alert(e.message);
-  }finally{
-    document.querySelectorAll("[data-research-handle]").forEach(function(btn){btn.disabled=false;});
+    document.querySelectorAll("[data-full-research-handle]").forEach(function(btn){btn.disabled=false;});
   }
 }
 
@@ -239,7 +213,7 @@ function renderResult(d){
   lines.push("Status: "+(d.status||"unknown"));
   lines.push("Mode: "+(d.mode||"unknown"));
   lines.push("Targets checked: "+(d.researched_targets||0));
-  lines.push("Findings created: "+(d.created_findings||0));
+  lines.push("Report candidates created: "+(d.created_findings||0));
   if(d.error) lines.push("Error: "+d.error);
   if(d.skipped&&d.skipped.length) lines.push("Notes:\n- "+d.skipped.join("\n- "));
   const status=document.getElementById("researchStatus");
