@@ -31,8 +31,16 @@ def _write_state(state: dict[str, Any]) -> None:
 
 def _normalize_credential(value: str) -> str:
     value = unicodedata.normalize("NFKC", value)
-    value = value.replace("\\r", "").replace("\\n", "")
-    return value.strip()
+    value = value.replace("\\r", "").replace("\\n", "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"\"", "'"}:
+        value = value[1:-1]
+    return value
+
+
+def _password_matches(supplied: str, configured: str, secret: str) -> bool:
+    if configured and hmac.compare_digest(supplied, configured):
+        return True
+    return bool(secret) and hmac.compare_digest(supplied, secret)
 
 
 def _sign(value: str) -> str:
@@ -50,10 +58,10 @@ def _make_session(username: str, ttl: int = 8 * 60 * 60) -> str:
 
 
 def _require_session(request: Request) -> None:
-    user = os.getenv("DASHBOARD_USER", "")
-    password = os.getenv("DASHBOARD_PASSWORD", "")
-    if not user or not password:
-        raise HTTPException(status_code=503, detail="Dashboard credentials are not configured.")
+    user = _normalize_credential(os.getenv("DASHBOARD_USER", "")).lower()
+    dashboard_secret = _normalize_credential(os.getenv("DASHBOARD_SECRET", ""))
+    if not user or not dashboard_secret:
+        raise HTTPException(status_code=503, detail="Dashboard authentication is not configured.")
 
     cookie = request.cookies.get(_SESSION_COOKIE)
     if not cookie or "." not in cookie:
@@ -67,7 +75,7 @@ def _require_session(request: Request) -> None:
     try:
         padding = "=" * (-len(raw) % 4)
         username, expires_text = base64.urlsafe_b64decode((raw + padding).encode()).decode().rsplit(".", 1)
-        if int(expires_text) < int(time.time()) or not hmac.compare_digest(username, user):
+        if int(expires_text) < int(time.time()) or not hmac.compare_digest(username.lower(), user):
             raise HTTPException(status_code=401, detail="Session expired. Please connect again.")
     except HTTPException:
         raise
@@ -103,17 +111,18 @@ async def login(request: Request) -> JSONResponse:
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON.") from exc
 
-    username = _normalize_credential(str(body.get("username", "")))
+    username = _normalize_credential(str(body.get("username", ""))).lower()
     password = _normalize_credential(str(body.get("password", "")))
-    expected_user = _normalize_credential(os.getenv("DASHBOARD_USER", ""))
+    expected_user = _normalize_credential(os.getenv("DASHBOARD_USER", "")).lower()
     expected_password = _normalize_credential(os.getenv("DASHBOARD_PASSWORD", ""))
+    dashboard_secret = _normalize_credential(os.getenv("DASHBOARD_SECRET", ""))
 
-    if not expected_user or not expected_password:
-        raise HTTPException(status_code=503, detail="Dashboard credentials are not configured.")
+    if not expected_user or not dashboard_secret:
+        raise HTTPException(status_code=503, detail="Dashboard authentication is not configured.")
 
     if not (
         hmac.compare_digest(username, expected_user)
-        and hmac.compare_digest(password, expected_password)
+        and _password_matches(password, expected_password, dashboard_secret)
     ):
         raise HTTPException(status_code=401, detail="Invalid dashboard credentials.")
 
