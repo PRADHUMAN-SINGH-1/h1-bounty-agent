@@ -51,6 +51,7 @@ pre{white-space:pre-wrap;background:#080f1a;border:1px solid #25354d;border-radi
 <div><h2>HackerOne Programs</h2><p class="muted">Select a program after reviewing its current policy and scope.</p></div>
 <button onclick="scanPrograms()">Scan Programs</button>
 </div>
+<div id="researchStatus" class="muted" style="margin-top:10px;white-space:pre-wrap"></div>
 <div id="programs" class="muted">No scan yet.</div>
 </div>
 </div>
@@ -142,7 +143,7 @@ function renderPrograms(programs){
         <span class="badge">score ${p.triage_score}</span>
       </div>
       <div class="actions" style="margin-top:12px">
-        <button class="primary" onclick="researchProgram(${JSON.stringify(p.handle)})">Research passively</button>
+        <button class="primary" data-research-handle="${handle}" onclick="researchProgram(${JSON.stringify(p.handle)})">Research passively</button>
       </div>
     </div>`;
   }).join("");
@@ -150,11 +151,23 @@ function renderPrograms(programs){
 
 async function researchProgram(handle){
   if(!confirm("Confirm you reviewed the current HackerOne program policy and authorize low-impact passive research for this program. Continue?")) return;
+
+  const status=document.getElementById("researchStatus");
+  status.textContent="Starting passive research for "+handle+"…";
+  status.className="muted";
+  document.querySelectorAll("[data-research-handle]").forEach(function(btn){btn.disabled=true;});
+
   try{
     const d=await request("/api/worker",{method:"POST",body:JSON.stringify({programs:[handle]})});
     renderResult(d);
     await load();
-  }catch(e){alert(e.message)}
+  }catch(e){
+    status.textContent="Research failed: "+e.message;
+    status.className="err";
+    alert(e.message);
+  }finally{
+    document.querySelectorAll("[data-research-handle]").forEach(function(btn){btn.disabled=false;});
+  }
 }
 
 function renderResult(d){
@@ -165,6 +178,9 @@ function renderResult(d){
   lines.push("Findings created: "+(d.created_findings||0));
   if(d.error) lines.push("Error: "+d.error);
   if(d.skipped&&d.skipped.length) lines.push("Notes:\n- "+d.skipped.join("\n- "));
+  const status=document.getElementById("researchStatus");
+  status.textContent=lines.join("\n");
+  status.className=(d.status==="ok"?"ok":(d.status==="blocked"?"muted":"err"));
   alert(lines.join("\n"));
 }
 
