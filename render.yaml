@@ -38,7 +38,7 @@ services:
       - key: ALLOW_STATE_CHANGING_TESTS
         value: "false"
       - key: H1_ENABLE_SUBMISSION
-        value: "false"
+        value: "true"
       - key: REQUESTS_PER_SECOND
         value: "1"
       - key: SESSION_MAP_MAX_PAGES
