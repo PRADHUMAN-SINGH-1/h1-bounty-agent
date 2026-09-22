@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -14,11 +16,14 @@ def utc_now() -> str:
 
 
 class PostgresStore:
+    _schema_lock = threading.Lock()
+    _schema_ready: set[str] = set()
+
     def __init__(self, database_url: str | None = None):
         self.database_url = database_url or os.getenv("DATABASE_URL", "")
         if not self.database_url:
             raise RuntimeError("DATABASE_URL is required for PostgresStore.")
-        self._ensure_schema()
+        self._ensure_schema_once()
 
     @property
     def durable(self) -> bool:
@@ -130,6 +135,28 @@ class PostgresStore:
             ]
             for statement in migrations:
                 conn.execute(statement)
+
+    
+    def _ensure_schema_once(self) -> None:
+        # Render can handle several concurrent HTTP requests against the same instance.
+        # Running CREATE/ALTER TABLE on every dashboard read can lock the findings table
+        # and surface as intermittent 500s. Initialize schema once per process instead.
+        if self.database_url in self._schema_ready:
+            return
+        with self._schema_lock:
+            if self.database_url in self._schema_ready:
+                return
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    self._ensure_schema()
+                    self._schema_ready.add(self.database_url)
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < 2:
+                        time.sleep(0.5 * (attempt + 1))
+            raise RuntimeError("Could not initialize persistent Postgres schema.") from last_error
 
     def close(self) -> None:
         return None
