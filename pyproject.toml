@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "h1-bounty-agent"
-version = "0.7.0"
+version = "0.8.0"
 description = "AI-assisted HackerOne research workspace with strict authorization and human validation gates"
 requires-python = ">=3.12,<3.13"
 dependencies = [

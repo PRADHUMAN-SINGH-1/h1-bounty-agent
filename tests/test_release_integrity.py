@@ -16,9 +16,13 @@ def test_dashboard_uses_event_binding_for_all_buttons():
     assert "onclick=" not in html
     for action in ("connectBtn", "run", "refreshBtn", "logoutBtn", "scanBtn"):
         assert f'id="{action}"' in html
-    for action in ("data-view-id", "data-approve-id", "data-submit-id", "data-research-handle", "data-assess-handle"):
+    for action in ("data-view-id", "data-approve-id", "data-submit-id", "data-full-research-handle"):
         assert action in html
-    assert html.count('addEventListener("click"') >= 8
+    assert "data-research-handle" not in html
+    assert "data-assess-handle" not in html
+    assert "async function assessProgram" not in html
+    assert 'body:JSON.stringify({programs:[handle],mode:"full"})' in html
+    assert html.count('addEventListener("click"') >= 7
     assert (REPO / "src" / "h1_agent" / "authorization.py").exists()
     assert (REPO / "src" / "h1_agent" / "attack_surface.py").exists()
 
@@ -45,3 +49,16 @@ def test_cli_uses_current_llm_and_active_gate():
 
 def test_report_module_compiles():
     compile((REPO / "src" / "h1_agent" / "reporting.py").read_text(encoding="utf-8"), "reporting.py", "exec")
+
+
+def test_full_research_pipeline_is_distinct_from_active_gate():
+    worker = (REPO / "src" / "h1_agent" / "worker.py").read_text(encoding="utf-8")
+    research = (REPO / "src" / "h1_agent" / "research.py").read_text(encoding="utf-8")
+    api = (REPO / "api" / "index.py").read_text(encoding="utf-8")
+    assert 'mode: str = ""' in worker
+    assert '"selected-program-full-research"' in worker
+    assert "selected_deep = True" in worker
+    assert "deep=selected_deep" in worker
+    assert "deep: bool = False" in research
+    assert "if (deep or active) and home_response is not None" in research
+    assert 'mode = str(body.get("mode", "") or "").strip().lower()' in api

@@ -51,6 +51,7 @@ def _research_program(
     max_targets: int,
     *,
     active: bool = False,
+    deep: bool = False,
 ) -> dict:
     result = {
         "program": handle,
@@ -87,7 +88,7 @@ def _research_program(
 
         engine = LowImpactResearch(settings, scopes)
         try:
-            evidence_results = engine.run(target, active=active)
+            evidence_results = engine.run(target, active=active, deep=deep)
         except Exception as exc:
             result["skipped"].append(f"{target}: {exc}")
             continue
@@ -263,6 +264,7 @@ def run_cycle(
     settings: Settings,
     requested_programs: set[str] | None = None,
     active: bool = False,
+    mode: str = "",
 ) -> dict:
     summary = {
         "status": "ok",
@@ -282,17 +284,32 @@ def run_cycle(
 
         # A selected-program request should not rescan the entire HackerOne catalog.
         if requested_programs:
-            if active and not settings.allow_active_tests:
-                summary["status"] = "blocked"
-                summary["mode"] = "selected-program-active-assessment"
-                summary["error_type"] = "authorization_gate"
-                summary["error"] = (
-                    "Active vulnerability assessment is disabled. "
-                    "Set ALLOW_ACTIVE_TESTS=true only after reviewing program policy and scope."
-                )
-                return summary
+            requested_mode = (mode or ("active" if active else "passive")).strip().lower()
+            if requested_mode in {"full", "deep", "deep-research"}:
+                research_mode = "selected-program-full-research"
+                # Full research always runs the complete non-destructive research
+                # pipeline. The legacy active flag is not required for that work.
+                selected_active = False
+                selected_deep = True
+            elif requested_mode in {"active", "assessment"}:
+                if not settings.allow_active_tests:
+                    summary["status"] = "blocked"
+                    summary["mode"] = "selected-program-active-assessment"
+                    summary["error_type"] = "authorization_gate"
+                    summary["error"] = (
+                        "Active vulnerability assessment is disabled. "
+                        "Set ALLOW_ACTIVE_TESTS=true only after reviewing program policy and scope."
+                    )
+                    return summary
+                research_mode = "selected-program-active-assessment"
+                selected_active = True
+                selected_deep = True
+            else:
+                research_mode = "selected-program-passive-research"
+                selected_active = False
+                selected_deep = False
 
-            summary["mode"] = "selected-program-active-assessment" if active else "selected-program-passive-research"
+            summary["mode"] = research_mode
             per_program = []
 
             for handle in sorted(requested_programs):
@@ -311,7 +328,8 @@ def run_cycle(
                         store,
                         handle,
                         settings.autonomous_max_targets_per_program,
-                        active=active,
+                        active=selected_active,
+                        deep=selected_deep,
                     )
                 except HackerOneAPIError as exc:
                     result = {

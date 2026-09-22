@@ -88,7 +88,13 @@ class LowImpactResearch:
         self._wait()
         return self.client.head(url, follow_redirects=False)
 
-    def run(self, target: str, *, active: bool = False) -> list[CheckResult]:
+    def run(
+        self,
+        target: str,
+        *,
+        active: bool = False,
+        deep: bool = False,
+    ) -> list[CheckResult]:
         asset = require_in_scope(target, self.scopes)
         if active and not self.settings.allow_active_tests:
             raise PermissionError(
@@ -109,7 +115,13 @@ class LowImpactResearch:
 
         results.append(self._options_probe(base))
 
-        if active and home_response is not None:
+        # "deep" means the full read-only research surface: endpoint discovery,
+        # business-logic modeling, hypotheses, API/GraphQL/WebSocket checks, CORS,
+        # reflection, redirect, error indicators, source maps, cloud signals, etc.
+        # These probes are non-destructive and do not require ALLOW_ACTIVE_TESTS.
+        # The legacy "active" flag remains available for callers that explicitly
+        # opt into that gate.
+        if (deep or active) and home_response is not None:
             results.extend(self._active_assessment(base, home_response))
 
         return results
