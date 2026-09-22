@@ -162,6 +162,7 @@ Never commit HackerOne credentials.**
 
 Vercel cannot run your Mac's local Ollama process. The production configuration now prefers Vercel AI Gateway with Vercel OIDC; Vercel documents OIDC authentication for AI Gateway, and its catalog includes free models. citeturn107218search3turn408691search1
 
+- Render Postgres schema migration/retry hardening for long-lived deployments and dashboard queue reads.
 ## Render deployment
 
 Vercel is not required for production hosting. This repository includes a Render Blueprint with a free FastAPI web service and Render Postgres, while scheduled research is triggered by GitHub Actions instead of a paid Render Cron Job.
