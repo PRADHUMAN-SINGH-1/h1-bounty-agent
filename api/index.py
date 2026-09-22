@@ -200,8 +200,31 @@ def approve_finding(
         from h1_agent.config import Settings
         from h1_agent.hackerone import HackerOneClient
         from h1_agent.scope import normalize_scopes, target_is_in_scope
+        from h1_agent.validation import validate_finding
+        from h1_agent.models import Evidence, Finding
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
+
+    candidate = Finding(
+        program_handle=row["program_handle"],
+        target=row["target"],
+        title=row["title"],
+        severity=row.get("severity"),
+        state=row.get("state", "needs_review"),
+        summary=row["summary"],
+        impact=row["impact"],
+        reproduction=row["reproduction"],
+        evidence=[Evidence(**item) for item in row["evidence"]],
+        structured_scope_id=row.get("structured_scope_id"),
+        weakness_id=row.get("weakness_id"),
+        metadata=row.get("metadata") or {},
+    )
+    validation = validate_finding(candidate)
+    if not validation.ok:
+        raise HTTPException(
+            status_code=400,
+            detail="Report completeness check failed: " + "; ".join(validation.blockers),
+        )
 
     settings = Settings()
     api = HackerOneClient(settings)
