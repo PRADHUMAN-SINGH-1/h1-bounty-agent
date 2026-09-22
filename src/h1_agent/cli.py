@@ -8,6 +8,8 @@ from .discovery import rank
 from .hackerone import HackerOneClient
 from .llm import LLMClient
 from .models import Evidence, Finding
+from .mobile import analyze_mobile_package
+from .cloud import analyze_cloud_text
 from .reporting import markdown_report
 from .research import LowImpactResearch, flatten
 from .scope import normalize_scopes, target_is_in_scope
@@ -42,6 +44,14 @@ def main() -> None:
     research.add_argument("target")
     research.add_argument("--active", action="store_true")
 
+    mobile = sub.add_parser("mobile-analyze", help="Statically analyze an APK/IPA package")
+    mobile.add_argument("path")
+
+    cloud = sub.add_parser("cloud-analyze", help="Analyze a text/JSON/IAM policy file for cloud footprint and policy indicators")
+    cloud.add_argument("path")
+
+    sub.add_parser("capabilities", help="Show implemented research capabilities")
+
     sub.add_parser("findings", help="List candidate findings")
 
     review = sub.add_parser("review", help="Show a candidate finding and its human checklist")
@@ -59,6 +69,37 @@ def main() -> None:
     args = parser.parse_args()
     settings = Settings()
     store = Store(settings)
+
+    if args.command == "capabilities":
+        capabilities = [
+            "authenticated session mapping",
+            "read-only workflow exploration",
+            "IDOR/BOLA differential testing",
+            "role/permission differential modeling",
+            "stateful read-only API workflows",
+            "GraphQL introspection",
+            "WebSocket handshake discovery",
+            "mobile package static analysis",
+            "cloud/IAM footprint and policy analysis",
+            "attack-chain correlation",
+            "scheduled recon integration",
+        ]
+        for item in capabilities:
+            print("[OK] " + item)
+        return
+
+    if args.command == "mobile-analyze":
+        result, evidence = analyze_mobile_package(args.path)
+        print(json.dumps({"result": result, "evidence": [item.__dict__ for item in evidence]}, indent=2))
+        return
+
+    if args.command == "cloud-analyze":
+        from pathlib import Path
+        path = Path(args.path)
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        result, evidence = analyze_cloud_text(text, str(path))
+        print(json.dumps({"result": result, "evidence": [item.__dict__ for item in evidence]}, indent=2))
+        return
 
     if args.command == "findings":
         for row in store.list_findings():

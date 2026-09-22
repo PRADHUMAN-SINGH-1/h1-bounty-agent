@@ -43,6 +43,15 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Reflection canary checks, credentialed CORS differential checks, redirect-parameter checks, cookie flag checks, source-map checks, API-spec discovery, and mixed-content observations
 - Optional two-account read-only authorization differential testing
 - Evidence-grounded finding drafting
+- Authenticated read-only session/workflow mapping
+- IDOR/BOLA object differential testing with two authorized test accounts
+- Role/permission differential modeling
+- Stateful read-only API workflow traversal
+- GraphQL introspection analysis
+- WebSocket endpoint discovery and handshake checks
+- Mobile APK/IPA static surface analysis
+- Cloud/IAM footprint and policy analysis
+- Attack-chain correlation
 - Human review and approval gate
 - Explicit submission gate
 - Vercel Python/ASGI entrypoints
@@ -92,6 +101,8 @@ ALLOW_AUTHZ_TESTS=false
 AUTHZ_HEADER_A=Authorization: Bearer <test-account-A-token>
 AUTHZ_HEADER_B=Authorization: Bearer <test-account-B-token>
 AUTHZ_MAX_ENDPOINTS=12
+SESSION_MAP_MAX_PAGES=40
+SESSION_MAP_MAX_DEPTH=2
 H1_ENABLE_SUBMISSION=false
 
 # Optional cron protection
@@ -190,6 +201,17 @@ h1-agent approve <finding-id>
 
 Submission remains separately disabled until explicitly enabled.
 
+Additional local analysis commands:
+
+```bash
+h1-agent mobile-analyze ./app.apk
+h1-agent mobile-analyze ./app.ipa
+h1-agent cloud-analyze ./policy.json
+h1-agent capabilities
+```
+
+Two-account authorization testing requires `ALLOW_AUTHZ_TESTS=true` plus two test-account headers. The tool performs read-only differential checks and still requires human reproduction before a report can be approved.
+
 ## Human validation
 
 **AI / automation:** program discovery, scope loading, research planning, low-impact evidence collection, evidence-grounded draft generation, report formatting.
@@ -218,4 +240,9 @@ This project does **not** guarantee bounty income. A finding must be real, repro
 10. More authorization-aware research plugins
 11. Deeper evidence correlation and report quality scoring
 12. Authenticated two-account authorization testing where a program explicitly permits it ✅
-13. Broader authenticated workflow mapping and state-aware business-logic analysis
+13. Authenticated workflow mapping ✅
+14. Stateful read-only API workflows ✅
+15. GraphQL/WebSocket coverage ✅
+16. Mobile/cloud static analysis ✅
+17. Broader state-changing business-logic tests remain intentionally gated to explicit program authorization and human validation
+

@@ -79,6 +79,8 @@ class Settings:
     authz_header_a: str = _raw("AUTHZ_HEADER_A")
     authz_header_b: str = _raw("AUTHZ_HEADER_B")
     authz_max_endpoints: int = max(_int("AUTHZ_MAX_ENDPOINTS", 12), 1)
+    session_map_max_pages: int = max(_int("SESSION_MAP_MAX_PAGES", 40), 1)
+    session_map_max_depth: int = max(_int("SESSION_MAP_MAX_DEPTH", 2), 0)
 
     autonomous_research: bool = _bool("AUTONOMOUS_RESEARCH", False)
     autonomous_passive_research: bool = _bool("AUTONOMOUS_PASSIVE_RESEARCH", False)
