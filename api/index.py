@@ -10,7 +10,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 app = FastAPI(title="H1 Bounty Agent", version="0.8.0")
@@ -378,6 +378,114 @@ def programs(request: Request) -> dict[str, Any]:
         return api.programs(page=1, page_size=25)
     finally:
         api.close()
+
+
+def _run_research_job(job_id: str, programs: list[str], mode: str) -> None:
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+    from h1_agent.worker import run_cycle
+
+    settings = Settings()
+    store = Store(settings)
+    try:
+        store.update_research_job(job_id, {"status": "running"})
+
+        def progress(payload: dict[str, Any]) -> None:
+            store.update_research_job(job_id, {
+                "status": "running",
+                "progress": payload,
+            })
+
+        result = run_cycle(
+            settings,
+            requested_programs=set(programs),
+            mode=mode,
+            on_progress=progress,
+        )
+        store.update_research_job(
+            job_id,
+            {
+                "status": "completed" if result.get("status") in {"ok", "blocked"} else "error",
+                "result": result,
+                "progress": {
+                    "program": None,
+                    "target": None,
+                    "planned_targets": result.get("researched_targets", 0),
+                    "completed_targets": result.get("researched_targets", 0),
+                },
+            },
+        )
+    except Exception as exc:
+        store.update_research_job(
+            job_id,
+            {
+                "status": "error",
+                "error": f"{exc.__class__.__name__}: {exc}",
+            },
+        )
+    finally:
+        store.close()
+
+
+@app.post("/api/research/jobs")
+async def start_research_job(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_action_token: str | None = Header(default=None),
+) -> JSONResponse:
+    _require_session(request)
+    _verify_action_token(x_action_token)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON.") from exc
+
+    programs = sorted({
+        str(handle).strip()
+        for handle in body.get("programs", [])
+        if str(handle).strip()
+    })
+    mode = str(body.get("mode", "full") or "full").strip().lower()
+    if not programs:
+        raise HTTPException(status_code=400, detail="At least one program handle is required.")
+    if mode not in {"full", "deep", "deep-research"}:
+        raise HTTPException(status_code=400, detail="This endpoint only starts full/deep research.")
+
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+
+    store = Store(Settings())
+    try:
+        job_id = store.create_research_job({"programs": programs, "mode": "full"})
+    finally:
+        store.close()
+
+    background_tasks.add_task(_run_research_job, job_id, programs, "full")
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "queued",
+            "job_id": job_id,
+            "mode": "full",
+            "programs": programs,
+        },
+    )
+
+
+@app.get("/api/research/jobs/{job_id}")
+def get_research_job(job_id: str, request: Request) -> dict[str, Any]:
+    _require_session(request)
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+
+    store = Store(Settings())
+    try:
+        try:
+            return store.get_research_job(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        store.close()
 
 
 @app.post("/api/worker")
