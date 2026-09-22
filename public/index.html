@@ -104,9 +104,9 @@ async function load(){
     if(!rows.length){document.getElementById("list").innerHTML="<p class='muted'>No report candidates yet.</p>";return;}
     document.getElementById("list").innerHTML=rows.map(x=>{
       let b='<div class="finding card"><div style="display:flex;justify-content:space-between;gap:12px"><div><div class="title">'+esc(x.title||"Untitled")+'</div><div class="meta">'+esc(x.program_handle)+' · '+esc(x.target)+' · '+esc(x.severity||"review")+'</div></div><span class="badge">'+esc(x.state)+'</span></div>';
-      b+='<div class="actions" style="margin-top:12px"><button data-view-id="\${x.id}">View report</button>';
-      if(x.state==="needs_review"||x.state==="draft")b+='<button class="primary" data-approve-id="\${x.id}">✓ Approve</button>';
-      if(x.state==="approved")b+='<button class="danger" data-submit-id="\${x.id}">Submit to HackerOne</button>';
+      b+='<div class="actions" style="margin-top:12px"><button data-view-id="${x.id}">View report</button>';
+      if(x.state==="needs_review"||x.state==="draft")b+='<button class="primary" data-approve-id="${x.id}">✓ Approve</button>';
+      if(x.state==="approved")b+='<button class="danger" data-submit-id="${x.id}">Submit to HackerOne</button>';
       b+='</div><details id="d'+x.id+'"><summary>Evidence / report</summary><pre id="p'+x.id+'">Open to load…</pre></details></div>'; return b;
     }).join("");
 
