@@ -96,9 +96,10 @@ DASHBOARD_PASSWORD=<strong password>
 DASHBOARD_SECRET=<random secret>
 
 # Hosted LLM for Vercel
-LLM_PROVIDER=huggingface
-HF_TOKEN=<Hugging Face token>
-LLM_MODEL=openai/gpt-oss-120b:groq
+LLM_PROVIDER=vercel_gateway
+LLM_BASE_URL=https://ai-gateway.vercel.sh/v1
+LLM_MODEL=inclusionai/ling-3.0-flash-vl-free
+# Production Vercel OIDC is preferred; enable "Secure Backend Access with OIDC Federation".
 
 # Local-only alternative
 LLM_PROVIDER=ollama
@@ -117,7 +118,7 @@ RESEARCH_PROGRAM_ALLOWLIST=<reviewed handles, comma separated>
 
 Never commit HackerOne credentials.**
 
-Vercel cannot run your Mac's local Ollama process. For deployed LLM analysis, use the included Hugging Face adapter or another OpenAI-compatible provider. Hugging Face currently gives free users a small monthly Inference Providers credit; usage limits and pricing can change.
+Vercel cannot run your Mac's local Ollama process. The production configuration now prefers Vercel AI Gateway with Vercel OIDC; Vercel documents OIDC authentication for AI Gateway, and its catalog includes free models. citeturn107218search3turn408691search1
 
 ## Local workflow
 
