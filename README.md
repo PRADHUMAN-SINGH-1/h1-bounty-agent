@@ -58,7 +58,7 @@ After Vercel rebuilds from the latest `main` commit:
 
 The cron worker is currently **discovery-only**. It does not autonomously attack targets or submit reports. That is intentional while the research and durable-state layers are being hardened.
 
-Vercel Cron can invoke Functions automatically. On Vercel Hobby, current documentation describes Cron as once per day with per-hour precision; Pro/Enterprise provide more frequent scheduling. citeturn991511search1turn991511search0
+Current Vercel scheduling depends on the plan: Hobby currently provides daily Cron execution with per-hour precision, while Pro/Enterprise support more frequent scheduling.
 
 ## Environment variables
 
@@ -152,7 +152,7 @@ Submission remains separately disabled until explicitly enabled.
 
 **You:** review current program rules, reproduce the behavior, confirm scope, verify impact/evidence, check duplicates/exclusions, confirm severity, and approve the report.
 
-HackerOne currently requires a human-in-the-loop for AI-assisted Hackbot activity and states that the researcher remains responsible for the submissions. citeturn939728search0
+HackerOne currently requires a human-in-the-loop for AI-assisted Hackbot activity and states that the researcher remains responsible for submissions.
 
 ## Zero-cash starting point
 
