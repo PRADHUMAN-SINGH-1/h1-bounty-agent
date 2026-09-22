@@ -9,11 +9,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 app = FastAPI(title="H1 Bounty Agent", version="0.4.0")
-
 _STATE = Path("/tmp/h1-findings.json")
+_SESSION_COOKIE = "h1_session"
 
 
 def _read_state() -> dict[str, Any]:
@@ -27,31 +28,44 @@ def _write_state(state: dict[str, Any]) -> None:
     _STATE.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
 
 
-def _require_basic(authorization: str | None) -> None:
+def _sign(value: str) -> str:
+    secret = os.getenv("DASHBOARD_SECRET", "")
+    if not secret:
+        raise HTTPException(status_code=503, detail="DASHBOARD_SECRET is not configured.")
+    return hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+
+
+def _make_session(username: str, ttl: int = 8 * 60 * 60) -> str:
+    expires = int(time.time()) + ttl
+    payload = f"{username}.{expires}"
+    raw = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    return f"{raw}.{_sign(raw)}"
+
+
+def _require_session(request: Request) -> None:
     user = os.getenv("DASHBOARD_USER", "")
     password = os.getenv("DASHBOARD_PASSWORD", "")
     if not user or not password:
         raise HTTPException(status_code=503, detail="Dashboard credentials are not configured.")
-    if not authorization or not authorization.startswith("Basic "):
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required.",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+
+    cookie = request.cookies.get(_SESSION_COOKIE)
+    if not cookie or "." not in cookie:
+        raise HTTPException(status_code=401, detail="Please connect to the dashboard.")
+
+    raw, supplied_sig = cookie.rsplit(".", 1)
+    expected = _sign(raw)
+    if not hmac.compare_digest(supplied_sig, expected):
+        raise HTTPException(status_code=401, detail="Session expired. Please connect again.")
+
     try:
-        decoded = base64.b64decode(authorization[6:]).decode("utf-8")
-        supplied_user, supplied_password = decoded.split(":", 1)
+        padding = "=" * (-len(raw) % 4)
+        username, expires_text = base64.urlsafe_b64decode((raw + padding).encode()).decode().rsplit(".", 1)
+        if int(expires_text) < int(time.time()) or not hmac.compare_digest(username, user):
+            raise HTTPException(status_code=401, detail="Session expired. Please connect again.")
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=401, detail="Invalid authentication header.") from exc
-    if not (
-        hmac.compare_digest(supplied_user, user)
-        and hmac.compare_digest(supplied_password, password)
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid credentials.",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        raise HTTPException(status_code=401, detail="Invalid session.") from exc
 
 
 def _action_token() -> str:
@@ -75,6 +89,47 @@ def _verify_action_token(token: str | None) -> None:
     raise HTTPException(status_code=403, detail="Invalid or expired action token.")
 
 
+@app.post("/api/auth/login")
+async def login(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON.") from exc
+
+    username = str(body.get("username", ""))
+    password = str(body.get("password", ""))
+    expected_user = os.getenv("DASHBOARD_USER", "")
+    expected_password = os.getenv("DASHBOARD_PASSWORD", "")
+
+    if not expected_user or not expected_password:
+        raise HTTPException(status_code=503, detail="Dashboard credentials are not configured.")
+
+    if not (
+        hmac.compare_digest(username, expected_user)
+        and hmac.compare_digest(password, expected_password)
+    ):
+        raise HTTPException(status_code=401, detail="Invalid dashboard credentials.")
+
+    response = JSONResponse({"status": "ok", "action_token": _action_token()})
+    response.set_cookie(
+        key=_SESSION_COOKIE,
+        value=_make_session(username),
+        max_age=8 * 60 * 60,
+        httponly=True,
+        secure=True,
+        samesite="strict",
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/auth/logout")
+def logout() -> JSONResponse:
+    response = JSONResponse({"status": "logged_out"})
+    response.delete_cookie(_SESSION_COOKIE, path="/")
+    return response
+
+
 @app.get("/api")
 def health() -> dict[str, Any]:
     return {
@@ -89,24 +144,17 @@ def health() -> dict[str, Any]:
 
 
 @app.get("/api/findings")
-def list_findings(authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    _require_basic(authorization)
+def list_findings(request: Request) -> dict[str, Any]:
+    _require_session(request)
     state = _read_state()
     rows = list(state.get("findings", {}).values())
     rows.sort(key=lambda row: int(row.get("id", 0)), reverse=True)
-    return {
-        "findings": rows,
-        "durable_storage": False,
-        "action_token": _action_token(),
-    }
+    return {"findings": rows, "durable_storage": False, "action_token": _action_token()}
 
 
 @app.get("/api/findings/{finding_id}")
-def get_finding(
-    finding_id: int,
-    authorization: str | None = Header(default=None),
-) -> dict[str, Any]:
-    _require_basic(authorization)
+def get_finding(finding_id: int, request: Request) -> dict[str, Any]:
+    _require_session(request)
     row = _read_state().get("findings", {}).get(str(finding_id))
     if row is None:
         raise HTTPException(status_code=404, detail="Finding not found.")
@@ -116,10 +164,10 @@ def get_finding(
 @app.post("/api/findings/{finding_id}/approve")
 def approve_finding(
     finding_id: int,
-    authorization: str | None = Header(default=None),
+    request: Request,
     x_action_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    _require_basic(authorization)
+    _require_session(request)
     _verify_action_token(x_action_token)
 
     state = _read_state()
@@ -158,10 +206,10 @@ def approve_finding(
 @app.post("/api/findings/{finding_id}/submit")
 def submit_finding(
     finding_id: int,
-    authorization: str | None = Header(default=None),
+    request: Request,
     x_action_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
-    _require_basic(authorization)
+    _require_session(request)
     _verify_action_token(x_action_token)
 
     if os.getenv("H1_ENABLE_SUBMISSION", "false").strip().lower() != "true":
@@ -225,14 +273,13 @@ def submit_finding(
 
 
 @app.get("/api/programs")
-def programs(authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    _require_basic(authorization)
+def programs(request: Request) -> dict[str, Any]:
+    _require_session(request)
     try:
         from h1_agent.config import Settings
         from h1_agent.hackerone import HackerOneClient
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
-
     settings = Settings()
     api = HackerOneClient(settings)
     try:
@@ -242,11 +289,8 @@ def programs(authorization: str | None = Header(default=None)) -> dict[str, Any]
 
 
 @app.post("/api/worker")
-def worker(
-    authorization: str | None = Header(default=None),
-    x_action_token: str | None = Header(default=None),
-) -> dict[str, Any]:
-    _require_basic(authorization)
+def worker(request: Request, x_action_token: str | None = Header(default=None)) -> dict[str, Any]:
+    _require_session(request)
     _verify_action_token(x_action_token)
     try:
         from h1_agent.config import Settings
