@@ -61,7 +61,7 @@ The project is intentionally **fail-closed**. A target must match an eligible st
 - Recon surface change detection
 - Persistent research memory
 - Human review and approval gate
-- Explicit submission gate
+- One-click **Approve & Submit** workflow after human reproduction/validation
 - Vercel Python/ASGI entrypoints
 - Vercel daily discovery/research worker with explicit program allowlist
 - Dashboard program selection with one-click full research per program
@@ -90,7 +90,7 @@ After Vercel rebuilds from the latest `main` commit:
 - `/api/worker` runs one on-demand cycle after dashboard authentication.
 - `/` opens the review dashboard.
 
-The scheduled worker remains discovery-first. The dashboard now exposes a single **Run Full Research** action per selected program. Full research runs the complete non-destructive research pipeline automatically: attack-surface discovery, workflow/business-logic modeling, hypothesis generation, CORS/reflection/redirect/error indicators, API/OpenAPI/GraphQL/WebSocket analysis, cloud/IAM indicators, attack-chain correlation, recon diffs, persistent research memory, and evidence-grounded LLM report drafting. This deep read-only research path does not depend on `ALLOW_ACTIVE_TESTS`. Two-account authorization testing is still opt-in with `ALLOW_AUTHZ_TESTS=true` and two explicitly supplied authorized test-account headers, and state-changing execution remains separately gated. All research remains structured-scope gated, does not submit forms or brute-force credentials, and never scans outside the selected HackerOne scope. Reports remain human-approved before submission.
+The scheduled worker remains discovery-first. The dashboard now exposes a single **Run Full Research** action per selected program. Full research runs the complete non-destructive research pipeline automatically: attack-surface discovery, workflow/business-logic modeling, hypothesis generation, CORS/reflection/redirect/error indicators, API/OpenAPI/GraphQL/WebSocket analysis, cloud/IAM indicators, attack-chain correlation, recon diffs, persistent research memory, and evidence-grounded LLM report drafting. This deep read-only research path does not depend on `ALLOW_ACTIVE_TESTS`. Two-account authorization testing is still opt-in with `ALLOW_AUTHZ_TESTS=true` and two explicitly supplied authorized test-account headers, and state-changing execution remains separately gated. All research remains structured-scope gated, does not submit forms or brute-force credentials, and never scans outside the selected HackerOne scope. Reports remain human-approved before submission. In the Render production Blueprint, `H1_ENABLE_SUBMISSION=true` means the dashboard's **Approve & Submit** action submits immediately after the approval gate succeeds; the backend still blocks submission unless the finding is approved, complete, in scope, and passes the existing validation checks.
 
 Current Vercel scheduling depends on the plan: Hobby currently provides daily Cron execution with per-hour precision, while Pro/Enterprise support more frequent scheduling.
 
@@ -111,7 +111,7 @@ AUTHZ_HEADER_B=Authorization: Bearer <test-account-B-token>
 AUTHZ_MAX_ENDPOINTS=12
 SESSION_MAP_MAX_PAGES=40
 SESSION_MAP_MAX_DEPTH=2
-H1_ENABLE_SUBMISSION=false
+H1_ENABLE_SUBMISSION=true
 
 # Optional cron protection
 CRON_SECRET=<random secret>
