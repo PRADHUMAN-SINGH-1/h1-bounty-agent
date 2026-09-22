@@ -76,7 +76,7 @@ services:
   - type: cron
     name: h1-bounty-agent-cron
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: singapore
     schedule: "0 3 * * *"
     buildCommand: pip install .
