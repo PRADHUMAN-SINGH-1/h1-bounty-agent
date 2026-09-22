@@ -101,6 +101,7 @@ def _research_program(
     active: bool = False,
     deep: bool = False,
     on_progress=None,
+    program_context: dict | None = None,
 ) -> dict:
     result = {
         "program": handle,
@@ -261,7 +262,26 @@ def _research_program(
             continue
 
         try:
-            draft = llm.draft_finding(handle, target, evidence_json)
+            triage = llm.triage_evidence(
+                handle,
+                target,
+                program_context or {},
+                evidence_json,
+            )
+            leads = triage.get("leads") if isinstance(triage.get("leads"), list) else []
+            leads = leads[:8]
+        except Exception as exc:
+            leads = []
+            result["skipped"].append(f"{target}: evidence triage failed; continuing with direct synthesis: {exc}")
+
+        try:
+            draft = llm.draft_finding(
+                handle,
+                target,
+                evidence_json,
+                leads=leads,
+                program_context=program_context or {},
+            )
         except Exception as exc:
             result["skipped"].append(f"{target}: LLM analysis failed: {exc}")
             continue
@@ -454,6 +474,12 @@ def run_cycle(
                         active=selected_active,
                         deep=selected_deep,
                         on_progress=on_progress,
+                        program_context={
+                            "handle": handle,
+                            "name": attrs.get("name") or handle,
+                            "state": attrs.get("state") or "",
+                            "policy": attrs.get("policy") or attrs.get("description") or "",
+                        },
                     )
                 except HackerOneAPIError as exc:
                     result = {
