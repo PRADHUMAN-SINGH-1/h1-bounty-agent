@@ -14,6 +14,12 @@ from .session_mapper import AuthenticatedSessionMapper
 from .websocket import discover_websocket_urls, websocket_handshake_probe
 from .workflow import evidence_summary, run_stateful_get_workflow
 from .cloud import analyze_cloud_text
+from .business_logic import build_workflow_model, model_evidence
+from .hypotheses import generate_hypotheses, hypothesis_evidence
+from .mutation import build_mutation_plans
+from .research_graph import build_research_graph
+from .recon_diff import compare_surfaces
+from .role_model import RoleObservation, build_role_graph, role_graph_evidence
 from .attack_surface import (
     discover_from_html,
     discover_from_javascript,
@@ -210,6 +216,51 @@ class LowImpactResearch:
             surface_evidence(unique_surface),
         ))
 
+        request_records = [
+            {
+                "method": endpoint.method_hint,
+                "url": endpoint.url,
+                "status": None,
+                "source": endpoint.source,
+            }
+            for endpoint in unique_surface
+        ]
+        graph = build_research_graph(request_records)
+        checks.append(
+            CheckResult(
+                "business_logic_model",
+                "found" if graph.business_model.nodes else "empty",
+                f"{len(graph.business_model.nodes)} workflow nodes, {len(graph.business_model.objects)} object signals, {len(graph.business_model.invariants)} invariants",
+                graph.evidence,
+            )
+        )
+        hypotheses = generate_hypotheses(graph.evidence)
+        checks.append(
+            CheckResult(
+                "hypothesis_engine",
+                "found" if hypotheses else "empty",
+                f"{len(hypotheses)} attack hypotheses generated from observed application semantics",
+                hypothesis_evidence(hypotheses),
+            )
+        )
+        mutation_plans = build_mutation_plans(request_records, self.scopes)
+        checks.append(
+            CheckResult(
+                "state_change_planner",
+                "ready" if mutation_plans else "empty",
+                f"{len(mutation_plans)} authorized state-change plans require explicit human/program approval before execution",
+                [
+                    Evidence(
+                        "mutation_plan",
+                        f"{item.method} {item.url}: {item.rationale}",
+                        item.url,
+                    )
+                    for item in mutation_plans
+                ],
+            )
+        )
+
+
         if self.settings.authz_header_a:
             try:
                 mapper = AuthenticatedSessionMapper(
@@ -360,6 +411,35 @@ class LowImpactResearch:
                     "Two-account read-only authorization differential",
                     evidence_from_results(differential),
                 ))
+                role_observations = []
+                for item in differential:
+                    role_observations.extend(
+                        [
+                            RoleObservation(
+                                "account-A",
+                                item.url,
+                                item.status_a or 0,
+                                200 <= (item.status_a or 0) < 300,
+                                "allowed" if 200 <= (item.status_a or 0) < 300 else "denied",
+                            ),
+                            RoleObservation(
+                                "account-B",
+                                item.url,
+                                item.status_b or 0,
+                                200 <= (item.status_b or 0) < 300,
+                                "allowed" if 200 <= (item.status_b or 0) < 300 else "denied",
+                            ),
+                        ]
+                    )
+                role_graph = build_role_graph(role_observations)
+                checks.append(
+                    CheckResult(
+                        "role_permission_model",
+                        "review" if role_graph.anomalies else "observed",
+                        f"{len(role_graph.permissions)} account permission sets inferred",
+                        role_graph_evidence(role_graph),
+                    )
+                )
             except ValueError as exc:
                 checks.append(CheckResult(
                     "authorization_differential",
