@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-app = FastAPI(title="H1 Bounty Agent", version="0.6.0")
+app = FastAPI(title="H1 Bounty Agent", version="0.7.0")
 _STATE = Path("/tmp/h1-findings.json")
 _SESSION_COOKIE = "h1_session"
 
