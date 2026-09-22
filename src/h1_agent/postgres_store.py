@@ -397,6 +397,41 @@ class PostgresStore:
                 ),
             )
 
+    def claim_next_research_job(self) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                WITH next_job AS (
+                    SELECT id
+                    FROM h1_research_jobs
+                    WHERE status = 'queued'
+                    ORDER BY created_at
+                    FOR UPDATE SKIP LOCKED
+                    LIMIT 1
+                )
+                UPDATE h1_research_jobs AS j
+                SET status = 'running',
+                    updated_at = %s
+                FROM next_job
+                WHERE j.id = next_job.id
+                RETURNING j.*
+                """,
+                (utc_now(),),
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        for key in ("programs", "progress"):
+            value = result.get(key)
+            if isinstance(value, str):
+                result[key] = json.loads(value)
+        if isinstance(result.get("result"), str):
+            result["result"] = json.loads(result["result"])
+        for key in ("created_at", "updated_at"):
+            if result.get(key) is not None and not isinstance(result[key], str):
+                result[key] = result[key].isoformat()
+        return result
+
     def get_research_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM h1_research_jobs WHERE id=%s", (job_id,)).fetchone()
