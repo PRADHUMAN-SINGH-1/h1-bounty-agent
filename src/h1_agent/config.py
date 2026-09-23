@@ -41,25 +41,28 @@ def _csv(name: str) -> tuple[str, ...]:
 
 def _llm_provider() -> str:
     configured = _raw("LLM_PROVIDER", "")
+    if configured:
+        return configured
+    if os.getenv("HF_TOKEN"):
+        return "huggingface"
     if os.getenv("VERCEL"):
-        if configured in {"", "ollama"}:
-            return "vercel_gateway"
-    return configured or "ollama"
+        return "vercel_gateway"
+    return "ollama"
 
 
 def _llm_base_url(provider: str) -> str:
-    if os.getenv("VERCEL") and provider in {"vercel_gateway", "ai_gateway"}:
-        return "https://ai-gateway.vercel.sh/v1"
     if provider in {"vercel_gateway", "ai_gateway"}:
         return _raw("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1")
+    if provider == "huggingface":
+        return _raw("LLM_BASE_URL", "https://router.huggingface.co/v1")
     return _raw("LLM_BASE_URL", "http://127.0.0.1:11434")
 
 
 def _llm_model(provider: str) -> str:
-    if os.getenv("VERCEL") and provider in {"vercel_gateway", "ai_gateway"}:
-        return "inclusionai/ling-3.0-flash-vl-free"
     if provider in {"vercel_gateway", "ai_gateway"}:
         return _raw("LLM_MODEL", "inclusionai/ling-3.0-flash-vl-free")
+    if provider == "huggingface":
+        return _raw("LLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
     return _raw("LLM_MODEL", "llama3.1:8b")
 
 
