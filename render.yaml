@@ -57,7 +57,7 @@ services:
         value: "500"
 
       - key: AUTONOMOUS_RESEARCH
-        value: "false"
+        value: "true"
       - key: AUTONOMOUS_PASSIVE_RESEARCH
         value: "false"
       - key: AUTONOMOUS_MAX_PROGRAMS
