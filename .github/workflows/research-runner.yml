@@ -44,14 +44,14 @@ jobs:
           set -u
           for attempt in $(seq 1 36); do
             response=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
-            if [ -n "$response" ]; then
+            if printf '%s' "$response" | grep -q '"findings"'; then
               printf '%s\n' "$response" > /tmp/findings.json
-              python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("title") or "").strip() and f.get("evidence") for f in p.get("findings") or []); print("evidence-backed report candidate:" , ok); raise SystemExit(0 if ok else 1)'
-              if [ $? -eq 0 ]; then
+              if python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("title") or "").strip() and f.get("evidence") for f in p.get("findings") or []); print("evidence-backed report candidate:", ok); raise SystemExit(0 if ok else 1)'; then
                 cat /tmp/findings.json
                 exit 0
               fi
             else
+              echo "findings endpoint not ready yet"
               cat /tmp/findings.err || true
             fi
             sleep 30
