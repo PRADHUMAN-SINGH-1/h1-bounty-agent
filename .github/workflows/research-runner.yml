@@ -29,4 +29,19 @@ jobs:
       - name: Trigger Render bounty worker
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error             --max-time 30             -H "Authorization: Bearer $CRON_SECRET"             "$H1_AGENT_URL/api/cron"
+          for attempt in $(seq 1 10); do
+            response=$(curl --fail-with-body --silent --show-error \
+              --max-time 30 \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$H1_AGENT_URL/api/cron")
+            echo "$response"
+            if echo "$response" | grep -q '"mode":"autonomous-hunt"'; then
+              exit 0
+            fi
+            if echo "$response" | grep -q '"mode":"queued-job"'; then
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "Worker did not accept an autonomous/queued research job within the retry window."
+          exit 1
