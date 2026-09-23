@@ -43,9 +43,10 @@ jobs:
           api = f"https://api.github.com/repos/{repo}/contents/src/h1_agent/worker.py?ref=main"
           req = urllib.request.Request(api, headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
           with urllib.request.urlopen(req, timeout=30) as response:
-              payload = json.load(response)
+              file_payload = json.load(response)
+          file_sha = file_payload["sha"]
 
-          content = base64.b64decode(payload["content"]).decode("utf-8")
+          content = base64.b64decode(file_payload["content"]).decode("utf-8")
           updated = content.replace(
               "if opportunity.handle not in allowlist:",
               "if allowlist and opportunity.handle not in allowlist:",
@@ -67,7 +68,7 @@ jobs:
           body = json.dumps({
               "message": "fix: exhaust HackerOne program catalog for autonomous discovery",
               "content": base64.b64encode(updated.encode("utf-8")).decode("ascii"),
-              "sha": payload["sha"],
+              "sha": file_sha,
               "branch": "main",
           }).encode("utf-8")
           put = urllib.request.Request(
