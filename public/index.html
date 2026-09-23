@@ -306,7 +306,8 @@ async function pollResearchJob(jobId){
       renderResult(job.result||{status:"ok"});
       return;
     }else if(job.status==="error"){
-      status.textContent="Deep research job failed: "+(job.error||"Unknown error");
+      const detail=job.error || ((job.result||{}).error) || "Research job failed without a reported error.";
+      status.textContent="Deep research job failed: "+detail;
       status.className="err";
       return;
     }
