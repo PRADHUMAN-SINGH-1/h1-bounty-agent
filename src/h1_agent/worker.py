@@ -21,6 +21,21 @@ from .recon_diff import compare_surfaces
 from .research_memory import make_memory
 
 
+def _coerce_optional_int(value) -> int | None:
+    """Normalize model-provided integer IDs before crossing the storage/API boundary."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        if candidate.isdigit() or (candidate.startswith("-") and candidate[1:].isdigit()):
+            return int(candidate)
+    return None
+
+
 def _target_for_asset(asset) -> str | None:
     kind = asset.asset_type.strip().lower()
     identifier = asset.asset_identifier.strip()
@@ -405,6 +420,7 @@ def _research_program(
             )
             continue
 
+        weakness_id = _coerce_optional_int(draft.get("weakness_id"))
         metadata = {
             "asset_type": asset.asset_type,
             "asset_identifier": asset.asset_identifier,
@@ -421,6 +437,7 @@ def _research_program(
             "remediation": draft.get("remediation") or "",
             "references": draft.get("references") or [],
             "weakness_name": draft.get("weakness_name") or "",
+            "weakness_id": weakness_id,
             "cvss_score": draft.get("cvss_score"),
             "cvss_vector": draft.get("cvss_vector") or "",
             "missing_validation": draft.get("missing_validation") or [],
@@ -437,7 +454,7 @@ def _research_program(
                 "reproduction": draft.get("reproduction", []),
                 "evidence": evidence_json,
                 "structured_scope_id": asset.id,
-                "weakness_id": draft.get("weakness_id"),
+                "weakness_id": weakness_id,
                 "metadata": metadata,
             }
         )
