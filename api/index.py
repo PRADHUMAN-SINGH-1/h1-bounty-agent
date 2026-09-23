@@ -10,7 +10,7 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 app = FastAPI(title="H1 Bounty Agent", version="0.8.0")
@@ -180,8 +180,19 @@ def list_findings(request: Request) -> dict[str, Any]:
     from h1_agent.store import Store
     store = Store(Settings())
     try:
-        rows = store.list_findings()
-        return {"findings": rows, "durable_storage": store.durable, "action_token": _action_token()}
+        try:
+            rows = store.list_findings()
+            storage_error = None
+        except Exception as exc:
+            # Keep the dashboard responsive while surfacing the actual backend failure.
+            rows = []
+            storage_error = f"{exc.__class__.__name__}: {exc}"
+        return {
+            "findings": rows,
+            "durable_storage": store.durable,
+            "action_token": _action_token(),
+            "storage_error": storage_error,
+        }
     finally:
         store.close()
 
@@ -387,9 +398,86 @@ def programs(request: Request) -> dict[str, Any]:
         api.close()
 
 
+def _run_autonomous_research_background() -> None:
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+    from h1_agent.worker import run_cycle
+
+    settings = Settings()
+    store = Store(settings)
+    try:
+        result = run_cycle(settings, mode="full")
+        # Scheduled autonomous runs are durable through their findings/results.
+        if result.get("status") == "error":
+            return
+    finally:
+        store.close()
+
+
+def _run_research_job_background(job_id: str, programs: list[str], mode: str) -> None:
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+    from h1_agent.worker import run_cycle
+
+    settings = Settings()
+    store = Store(settings)
+    try:
+        def progress(payload: dict) -> None:
+            store.update_research_job(
+                job_id,
+                {"status": "running", "progress": payload},
+            )
+
+        store.update_research_job(
+            job_id,
+            {
+                "status": "running",
+                "progress": {
+                    "program": None,
+                    "target": None,
+                    "completed_targets": 0,
+                    "planned_targets": 0,
+                },
+            },
+        )
+        result = run_cycle(
+            settings,
+            requested_programs=set(programs),
+            mode=mode,
+            on_progress=progress,
+        )
+        store.update_research_job(
+            job_id,
+            {
+                "status": "completed" if result.get("status") in {"ok", "blocked"} else "error",
+                "result": result,
+                "progress": {
+                    "program": None,
+                    "target": None,
+                    "completed_targets": result.get("researched_targets", 0),
+                    "planned_targets": result.get("researched_targets", 0),
+                },
+            },
+        )
+    except Exception as exc:
+        try:
+            store.update_research_job(
+                job_id,
+                {
+                    "status": "error",
+                    "error": f"{exc.__class__.__name__}: {exc}",
+                },
+            )
+        except Exception:
+            pass
+    finally:
+        store.close()
+
+
 @app.post("/api/research/jobs")
 async def start_research_job(
     request: Request,
+    background_tasks: BackgroundTasks,
     x_action_token: str | None = Header(default=None),
 ) -> JSONResponse:
     _require_session(request)
@@ -415,9 +503,16 @@ async def start_research_job(
 
     store = Store(Settings())
     try:
-        job_id = store.create_research_job({"programs": programs, "mode": "full"})
+        job_id = store.create_research_job({"programs": programs, "mode": mode})
     finally:
         store.close()
+
+    background_tasks.add_task(
+        _run_research_job_background,
+        job_id,
+        programs,
+        mode,
+    )
 
     return JSONResponse(
         status_code=202,
@@ -520,15 +615,44 @@ def diagnostics(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/cron")
-def cron(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron(
+    background_tasks: BackgroundTasks,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
     secret = os.getenv("CRON_SECRET", "")
     if not secret:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured.")
     if authorization != f"Bearer {secret}":
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+
+    settings = Settings()
+    store = Store(settings)
     try:
-        from h1_agent.config import Settings
-        from h1_agent.worker import run_cycle
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
-    return run_cycle(Settings())
+        queued = store.claim_next_research_job()
+    finally:
+        store.close()
+
+    if queued:
+        background_tasks.add_task(
+            _run_research_job_background,
+            str(queued["id"]),
+            [str(item) for item in queued.get("programs", [])],
+            str(queued.get("mode") or "full"),
+        )
+        return {
+            "status": "accepted",
+            "mode": "queued-job",
+            "job_id": str(queued["id"]),
+        }
+
+    # No manually queued job: perform autonomous discovery as a scheduled full hunt.
+    background_tasks.add_task(
+        _run_autonomous_research_background,
+    )
+    return {
+        "status": "accepted",
+        "mode": "autonomous-hunt",
+    }

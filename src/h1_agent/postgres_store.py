@@ -35,6 +35,7 @@ class PostgresStore:
             row_factory=dict_row,
             connect_timeout=15,
             application_name="h1-bounty-agent",
+            options="-c statement_timeout=15000 -c lock_timeout=3000",
             autocommit=True,
         )
 
@@ -290,7 +291,14 @@ class PostgresStore:
             try:
                 with self._connect() as conn:
                     rows = conn.execute(
-                        "SELECT * FROM h1_findings ORDER BY id DESC"
+                        """
+                        SELECT id, program_handle, target, title, severity, state,
+                               summary, impact, reproduction, evidence,
+                               structured_scope_id, weakness_id, report_json,
+                               created_at, approved_at, submitted_at, h1_report_id, metadata
+                        FROM h1_findings
+                        ORDER BY id DESC
+                        """
                     ).fetchall()
                 return [self._row(row) for row in rows]
             except (psycopg.Error, OSError) as exc:

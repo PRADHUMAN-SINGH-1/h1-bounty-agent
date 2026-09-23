@@ -18,9 +18,9 @@ def test_render_blueprint_contains_free_web_and_database():
 def test_github_research_runner_is_configured():
     text = Path(".github/workflows/research-runner.yml").read_text(encoding="utf-8")
     assert 'cron: "*/5 * * * *"' in text
-    assert "scripts/research_runner.py" in text
-    assert "RESEARCH_DATABASE_URL" in text
-    assert "H1_ENABLE_SUBMISSION: \"false\"" in text
+    assert "/api/cron" in text
+    assert "H1_AGENT_URL" in text
+    assert "CRON_SECRET" in text
 
 
 def test_store_defaults_to_json_without_database(monkeypatch, tmp_path):

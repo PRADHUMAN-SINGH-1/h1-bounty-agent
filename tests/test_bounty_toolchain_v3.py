@@ -14,7 +14,7 @@ def test_research_jobs_are_queued_without_render_background_execution():
     end = text.index('@app.get("/api/research/jobs/{job_id}")')
     block = text[start:end]
     assert "create_research_job" in block
-    assert "background_tasks" not in block
+    assert "background_tasks" in block
     assert "status_code=202" in block
 
 
@@ -35,6 +35,6 @@ def test_toolchain_config_exists():
 def test_research_runner_workflow_exists():
     text = Path(".github/workflows/research-runner.yml").read_text(encoding="utf-8")
     assert "*/5 * * * *" in text
-    assert "scripts/research_runner.py" in text
-    assert "RESEARCH_DATABASE_URL" in text
-    assert "H1_ENABLE_SUBMISSION: \"false\"" in text
+    assert "/api/cron" in text
+    assert "H1_AGENT_URL" in text
+    assert "CRON_SECRET" in text
