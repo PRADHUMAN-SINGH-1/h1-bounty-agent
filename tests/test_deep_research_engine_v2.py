@@ -45,9 +45,11 @@ def test_async_job_api_exists():
     assert '@app.post("/api/research/jobs")' in source
     assert '@app.get("/api/research/jobs/{job_id}")' in source
     assert "create_research_job" in source
-    assert "BackgroundTasks" not in source
-    runner = Path("scripts/research_runner.py").read_text(encoding="utf-8")
-    assert "claim_next_research_job" in runner
+    assert "BackgroundTasks" in source
+    assert "_run_research_job_background" in source
+    assert "background_tasks.add_task" in source
+    runner = Path(".github/workflows/research-runner.yml").read_text(encoding="utf-8")
+    assert "/api/cron" in runner
 
 
 def test_dashboard_polls_research_jobs():
