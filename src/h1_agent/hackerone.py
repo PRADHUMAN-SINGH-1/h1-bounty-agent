@@ -61,50 +61,64 @@ class HackerOneClient:
                 f"Could not reach HackerOne API: {exc.__class__.__name__}.",
             ) from exc
 
-    def programs(self, page: int = 1, page_size: int = 25) -> dict[str, Any]:
-        page_size = min(max(page_size, 1), 100)
+    def _programs_page(self, page: int, page_size: int) -> dict[str, Any]:
         return self._get(
             "/hackers/programs",
             "program discovery",
-            **{"page[number]": page, "page[size]": page_size},
+            **{"page[number]": page, "page[size]": min(max(page_size, 1), 100)},
         )
+
+    def programs(self, page: int = 1, page_size: int = 25) -> dict[str, Any]:
+        """Return the requested page; page 1 is expanded for legacy callers that expected discovery."""
+        page_size = min(max(page_size, 1), 100)
+        if page != 1:
+            return self._programs_page(page, page_size)
+        return self.programs_all(page_size=page_size, max_pages=20)
 
     def programs_all(self, *, page_size: int = 100, max_pages: int = 20) -> dict[str, Any]:
         """Fetch the complete accessible program catalog, not just the first page."""
         data: list[dict[str, Any]] = []
         pages = 0
+        effective_size = min(max(page_size, 1), 100)
         for page in range(1, max(max_pages, 1) + 1):
-            payload = self.programs(page=page, page_size=page_size)
+            payload = self._programs_page(page, effective_size)
             batch = payload.get("data") or []
             if not isinstance(batch, list):
                 raise HackerOneAPIError("program discovery", "HackerOne returned an invalid program data shape.")
             data.extend(batch)
             pages += 1
-            if len(batch) < min(max(page_size, 1), 100):
+            if len(batch) < effective_size:
                 break
         return {"data": data, "meta": {"pages_fetched": pages, "count": len(data)}}
 
     def program(self, handle: str) -> dict[str, Any]:
         return self._get(f"/hackers/programs/{handle}", "program lookup")
 
-    def structured_scopes(self, handle: str, page: int = 1, page_size: int = 100) -> dict[str, Any]:
-        page_size = min(max(page_size, 1), 100)
+    def _structured_scopes_page(self, handle: str, page: int, page_size: int) -> dict[str, Any]:
         return self._get(
             f"/hackers/programs/{handle}/structured_scopes",
             "structured scope retrieval",
-            **{"page[number]": page, "page[size]": page_size},
+            **{"page[number]": page, "page[size]": min(max(page_size, 1), 100)},
         )
+
+    def structured_scopes(self, handle: str, page: int = 1, page_size: int = 100) -> dict[str, Any]:
+        """Return all scope pages for the common page-1 caller; explicit pages remain available."""
+        page_size = min(max(page_size, 1), 100)
+        if page != 1:
+            return self._structured_scopes_page(handle, page, page_size)
+        return self.structured_scopes_all(handle, page_size=page_size, max_pages=20)
 
     def structured_scopes_all(self, handle: str, *, page_size: int = 100, max_pages: int = 20) -> dict[str, Any]:
         """Fetch every structured scope page so large programs are not silently truncated."""
         data: list[dict[str, Any]] = []
+        effective_size = min(max(page_size, 1), 100)
         for page in range(1, max(max_pages, 1) + 1):
-            payload = self.structured_scopes(handle, page=page, page_size=page_size)
+            payload = self._structured_scopes_page(handle, page, effective_size)
             batch = payload.get("data") or []
             if not isinstance(batch, list):
                 raise HackerOneAPIError("structured scope retrieval", "HackerOne returned an invalid scope data shape.")
             data.extend(batch)
-            if len(batch) < min(max(page_size, 1), 100):
+            if len(batch) < effective_size:
                 break
         return {"data": data, "meta": {"count": len(data)}}
 
@@ -114,23 +128,29 @@ class HackerOneClient:
             "scope exclusion retrieval",
         )
 
-    def weaknesses(self, handle: str, page: int = 1, page_size: int = 100) -> dict[str, Any]:
-        page_size = min(max(page_size, 1), 100)
+    def _weaknesses_page(self, handle: str, page: int, page_size: int) -> dict[str, Any]:
         return self._get(
             f"/hackers/programs/{handle}/weaknesses",
             "weakness retrieval",
-            **{"page[number]": page, "page[size]": page_size},
+            **{"page[number]": page, "page[size]": min(max(page_size, 1), 100)},
         )
+
+    def weaknesses(self, handle: str, page: int = 1, page_size: int = 100) -> dict[str, Any]:
+        page_size = min(max(page_size, 1), 100)
+        if page != 1:
+            return self._weaknesses_page(handle, page, page_size)
+        return self.weaknesses_all(handle, page_size=page_size, max_pages=20)
 
     def weaknesses_all(self, handle: str, *, page_size: int = 100, max_pages: int = 20) -> dict[str, Any]:
         data: list[dict[str, Any]] = []
+        effective_size = min(max(page_size, 1), 100)
         for page in range(1, max(max_pages, 1) + 1):
-            payload = self.weaknesses(handle, page=page, page_size=page_size)
+            payload = self._weaknesses_page(handle, page, effective_size)
             batch = payload.get("data") or []
             if not isinstance(batch, list):
                 raise HackerOneAPIError("weakness retrieval", "HackerOne returned an invalid weakness data shape.")
             data.extend(batch)
-            if len(batch) < min(max(page_size, 1), 100):
+            if len(batch) < effective_size:
                 break
         return {"data": data, "meta": {"count": len(data)}}
 
