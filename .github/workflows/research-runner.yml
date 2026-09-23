@@ -1,7 +1,6 @@
 name: H1 Research Trigger
 
-# Autonomous hunt loop: trigger the deployed worker, then inspect its persisted job state.
-# Triggered manually by a repository update when an end-to-end hunt verification is requested.
+# Autonomous hunt loop: trigger the deployed worker, then inspect its persisted findings.
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -10,11 +9,12 @@ on:
     paths:
       - ".github/workflows/research-runner.yml"
       - "render.yaml"
+      - "api/index.py"
 
 jobs:
   trigger:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
@@ -31,18 +31,47 @@ jobs:
         run: |
           set -euo pipefail
           for attempt in $(seq 1 10); do
-            response=$(curl --fail-with-body --silent --show-error \
-              --max-time 30 \
+            response=$(curl --fail-with-body --silent --show-error --max-time 30 \
               -H "Authorization: Bearer $CRON_SECRET" \
               "$H1_AGENT_URL/api/cron")
             echo "$response"
             if echo "$response" | grep -q '"mode":"autonomous-hunt"'; then
-              exit 0
+              break
             fi
             if echo "$response" | grep -q '"mode":"queued-job"'; then
+              break
+            fi
+            sleep 30
+          done
+
+      - name: Poll for a persisted bounty report
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 36); do
+            response=$(curl --fail-with-body --silent --show-error --max-time 30 \
+              -H "Authorization: Bearer $CRON_SECRET" \
+              "$H1_AGENT_URL/api/cron/findings")
+            echo "$response" > /tmp/findings.json
+            python - <<'PY'
+            import json
+            from pathlib import Path
+            payload=json.loads(Path('/tmp/findings.json').read_text())
+            findings=payload.get('findings') or []
+            print(f"persisted findings: {len(findings)}")
+            for finding in findings:
+                state=str(finding.get('state') or '')
+                title=str(finding.get('title') or '').strip()
+                evidence=finding.get('evidence') or []
+                if state in {'needs_review','approved','submitted'} and title and evidence:
+                    print(json.dumps(finding, ensure_ascii=False, indent=2))
+                    raise SystemExit(0)
+            raise SystemExit(1)
+            PY
+            if [ $? -eq 0 ]; then
+              echo "A report candidate with evidence was persisted."
               exit 0
             fi
             sleep 30
           done
-          echo "Worker did not accept an autonomous/queued research job within the retry window."
+          echo "Autonomous hunt completed its verification window without a persisted evidence-backed report candidate."
           exit 1
