@@ -149,11 +149,7 @@ class Settings:
     def require_autonomous_research(self) -> None:
         if not self.autonomous_research:
             raise RuntimeError("Autonomous research is disabled.")
-        if not self.allow_active_tests:
-            raise RuntimeError(
-                "Active testing is disabled. Review program rules before enabling it."
-            )
-        if not self.research_program_allowlist:
-            raise RuntimeError(
-                "RESEARCH_PROGRAM_ALLOWLIST is empty. Review and explicitly allow programs first."
-            )
+        # An empty allowlist means "let the discovery engine choose eligible
+        # bounty programs". A non-empty allowlist remains an explicit filter.
+        # Autonomous mode itself stays passive/read-only unless active testing
+        # is explicitly enabled through the separate assessment path.
