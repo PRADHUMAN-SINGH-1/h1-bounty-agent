@@ -70,10 +70,20 @@ jobs:
       - name: Validate runner secrets
         run: |
           set -euo pipefail
-          test -n "$DATABASE_URL"
-          test -n "$HACKERONE_USERNAME"
-          test -n "$HACKERONE_API_TOKEN"
-          test -n "$HF_TOKEN"
+          missing=()
+          [ -n "$DATABASE_URL" ] || missing+=(RESEARCH_DATABASE_URL)
+          [ -n "$HACKERONE_USERNAME" ] || missing+=(HACKERONE_USERNAME)
+          [ -n "$HACKERONE_API_TOKEN" ] || missing+=(HACKERONE_API_TOKEN)
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required GitHub Actions secret(s): ${missing[*]}"
+            echo "Configure these repository secrets before queued research can execute."
+            exit 1
+          fi
+
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::warning::HF_TOKEN is not configured. Research will collect evidence but skip LLM candidate drafting."
+          fi
 
       - name: Run one queued research job
         run: python scripts/research_runner.py
