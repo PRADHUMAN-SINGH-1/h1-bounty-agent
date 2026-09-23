@@ -1,0 +1,79 @@
+name: Repair dashboard polling
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[dashboard-repair]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch research polling
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          path=Path('public/index.html')
+          s=path.read_text()
+          pattern=r'async function pollResearchJob\(jobId\)\{.*?\n\}\n\nfunction renderResult'
+          replacement='''async function pollResearchJob(jobId){
+  const status=document.getElementById("researchStatus");
+  const started=Date.now();
+  const timeoutMs=30*60*1000;
+  for(;;){
+    const job=await request("/api/research/jobs/"+encodeURIComponent(jobId));
+    const p=job.progress||{};
+    const pct=p.planned_targets ? Math.floor((100*p.completed_targets)/p.planned_targets) : 0;
+    const phase=p.phase||"running";
+    const detail=p.detail||"Working";
+    if(job.status==="queued"){
+      status.textContent=["Research queued","Job: "+jobId].join("\\n");
+    }else if(job.status==="running"){
+      status.textContent=["Bounty research running","Job: "+jobId,"Phase: "+phase,"Detail: "+detail,"Program: "+(p.program||"—"),"Target: "+(p.target||"—"),"Progress: "+(p.completed_targets||0)+"/"+(p.planned_targets||"—")+" targets ("+pct+"%)","Evidence collected: "+(p.evidence_collected||0)].join("\\n");
+    }else if(job.status==="completed"){
+      renderResult(job.result||{status:"ok"});
+      await load();
+      return job.result||{};
+    }else if(job.status==="error"){
+      const detail=job.error || ((job.result||{}).error) || "Research job failed without a reported error.";
+      status.textContent="Deep research job failed: "+detail;
+      status.className="err";
+      return;
+    }
+    if(Date.now()-started>timeoutMs){
+      throw new Error("Research job exceeded the dashboard timeout; inspect the worker error/progress instead of waiting indefinitely.");
+    }
+    await new Promise(function(resolve){setTimeout(resolve,3000);});
+  }
+}
+
+function renderResult'''
+          s2,n=re.subn(pattern,replacement,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('pollResearchJob function was not found exactly once')
+          path.write_text(s2)
+          PY
+          node --check <(python - <<'PY'
+          from pathlib import Path
+          s=Path('public/index.html').read_text()
+          print(s.split('<script>',1)[1].split('</script>',1)[0])
+          PY
+          )
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/index.html
+          git commit -m "fix dashboard research progress [dashboard-repair]"
+          git push
+      - name: Remove temporary workflow
+        if: ${{ success() }}
+        run: |
+          git rm .github/workflows/repair-dashboard.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore remove dashboard repair workflow [dashboard-repair]"
+          git push
