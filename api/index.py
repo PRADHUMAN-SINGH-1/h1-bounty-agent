@@ -601,28 +601,56 @@ async def worker(
     background_tasks: BackgroundTasks,
     x_action_token: str | None = Header(default=None),
 ) -> JSONResponse:
-    """Compatibility endpoint: discovery is always queued, never executed in the request."""
+    """Compatibility endpoint that always queues work; it never executes a long cycle in the request."""
     _require_session(request)
     _verify_action_token(x_action_token)
+
+    body: dict[str, Any] = {}
+    try:
+        parsed = await request.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:
+        body = {}
+
+    requested_programs = sorted({
+        str(handle).strip()
+        for handle in body.get("programs", [])
+        if str(handle).strip()
+    })
+    active = bool(body.get("active", False))
+    mode = str(body.get("mode", "") or "").strip().lower()
+
+    if requested_programs:
+        job_mode = mode if mode in {"full", "deep", "deep-research", "active", "assessment", "passive"} else "full"
+        programs_for_job = requested_programs
+    else:
+        job_mode = "discovery"
+        programs_for_job = []
 
     from h1_agent.config import Settings
     from h1_agent.store import Store
 
     store = Store(Settings())
     try:
-        job_id = store.create_research_job({"programs": [], "mode": "discovery"})
+        job_id = store.create_research_job({"programs": programs_for_job, "mode": job_mode})
     finally:
         store.close()
 
     background_tasks.add_task(
         _run_research_job_background,
         job_id,
-        [],
-        "discovery",
+        programs_for_job,
+        "active" if active and job_mode == "active" else job_mode,
     )
     return JSONResponse(
         status_code=202,
-        content={"status": "queued", "job_id": job_id, "mode": "discovery"},
+        content={
+            "status": "queued",
+            "job_id": job_id,
+            "mode": job_mode,
+            "programs": programs_for_job,
+        },
     )
 
 
