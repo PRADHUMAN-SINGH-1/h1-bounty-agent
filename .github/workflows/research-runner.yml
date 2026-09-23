@@ -1,4 +1,4 @@
-name: H1 Research Runner
+name: H1 Research Trigger
 
 on:
   schedule:
