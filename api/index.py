@@ -398,6 +398,22 @@ def programs(request: Request) -> dict[str, Any]:
         api.close()
 
 
+def _run_autonomous_research_background() -> None:
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+    from h1_agent.worker import run_cycle
+
+    settings = Settings()
+    store = Store(settings)
+    try:
+        result = run_cycle(settings, mode="full")
+        # Scheduled autonomous runs are durable through their findings/results.
+        if result.get("status") == "error":
+            return
+    finally:
+        store.close()
+
+
 def _run_research_job_background(job_id: str, programs: list[str], mode: str) -> None:
     from h1_agent.config import Settings
     from h1_agent.store import Store
@@ -599,15 +615,44 @@ def diagnostics(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/cron")
-def cron(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron(
+    background_tasks: BackgroundTasks,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
     secret = os.getenv("CRON_SECRET", "")
     if not secret:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured.")
     if authorization != f"Bearer {secret}":
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+
+    settings = Settings()
+    store = Store(settings)
     try:
-        from h1_agent.config import Settings
-        from h1_agent.worker import run_cycle
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Backend dependency failed: {exc}") from exc
-    return run_cycle(Settings())
+        queued = store.claim_next_research_job()
+    finally:
+        store.close()
+
+    if queued:
+        background_tasks.add_task(
+            _run_research_job_background,
+            str(queued["id"]),
+            [str(item) for item in queued.get("programs", [])],
+            str(queued.get("mode") or "full"),
+        )
+        return {
+            "status": "accepted",
+            "mode": "queued-job",
+            "job_id": str(queued["id"]),
+        }
+
+    # No manually queued job: perform autonomous discovery as a scheduled full hunt.
+    background_tasks.add_task(
+        _run_autonomous_research_background,
+    )
+    return {
+        "status": "accepted",
+        "mode": "autonomous-hunt",
+    }
