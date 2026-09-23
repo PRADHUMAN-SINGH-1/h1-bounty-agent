@@ -446,11 +446,20 @@ def _run_research_job_background(job_id: str, programs: list[str], mode: str) ->
             mode=mode,
             on_progress=progress,
         )
+        job_error = result.get("error")
+        if not job_error and result.get("status") == "error":
+            failures = [
+                f"{item.get('program')}: {item.get('error')}"
+                for item in result.get("program_results", [])
+                if item.get("error")
+            ]
+            job_error = " | ".join(failures) if failures else "Research job failed without a reported error."
         store.update_research_job(
             job_id,
             {
                 "status": "completed" if result.get("status") in {"ok", "blocked"} else "error",
                 "result": result,
+                "error": job_error,
                 "progress": {
                     "program": None,
                     "target": None,
@@ -460,12 +469,13 @@ def _run_research_job_background(job_id: str, programs: list[str], mode: str) ->
             },
         )
     except Exception as exc:
+        error_text = f"{exc.__class__.__name__}: {exc}"
         try:
             store.update_research_job(
                 job_id,
                 {
                     "status": "error",
-                    "error": f"{exc.__class__.__name__}: {exc}",
+                    "error": error_text,
                 },
             )
         except Exception:
@@ -537,9 +547,12 @@ async def start_research_job(
     _require_session(request)
     _verify_action_token(x_action_token)
     try:
-        body = await request.json()
+        parsed = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON.") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    body = parsed
 
     programs = sorted({
         str(handle).strip()
@@ -588,9 +601,20 @@ def get_research_job(job_id: str, request: Request) -> dict[str, Any]:
     store = Store(Settings())
     try:
         try:
-            return store.get_research_job(job_id)
+            result = store.get_research_job(job_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if result.get("status") == "error" and not result.get("error"):
+            payload = result.get("result") or {}
+            failures = [
+                f"{item.get('program')}: {item.get('error')}"
+                for item in payload.get("program_results", [])
+                if item.get("error")
+            ]
+            result["error"] = payload.get("error") or (
+                " | ".join(failures) if failures else "Research job failed without a reported error."
+            )
+        return result
     finally:
         store.close()
 
