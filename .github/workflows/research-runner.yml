@@ -8,6 +8,7 @@ on:
   push:
     paths:
       - ".github/workflows/research-runner.yml"
+      - "render.yaml"
 
 jobs:
   trigger:
