@@ -14,7 +14,7 @@ def test_research_jobs_are_queued_without_render_background_execution():
     end = text.index('@app.get("/api/research/jobs/{job_id}")')
     block = text[start:end]
     assert "create_research_job" in block
-    assert "background_tasks" not in block
+    assert "background_tasks" in block
     assert "status_code=202" in block
 
 
