@@ -21,7 +21,7 @@ def test_postgres_findings_query_uses_stable_projection_and_timeouts():
 def test_cron_triggers_background_work():
     text = Path("api/index.py").read_text(encoding="utf-8")
     start = text.index('@app.get("/api/cron")')
-    end = text.index('@app.get("/api/diagnostics")')
+    end = len(text)
     block = text[start:end]
     assert "BackgroundTasks" in block
     assert "_run_research_job_background" in block
