@@ -50,19 +50,19 @@ jobs:
               "$H1_AGENT_URL/api/cron/findings"); then
               printf '%s\n' "$response" > /tmp/findings.json
               if python - <<'PY'
-import json
-from pathlib import Path
-payload=json.loads(Path('/tmp/findings.json').read_text())
-for finding in payload.get('findings') or []:
-    state=str(finding.get('state') or '')
-    title=str(finding.get('title') or '').strip()
-    evidence=finding.get('evidence') or []
-    if state in {'needs_review','approved','submitted'} and title and evidence:
-        print(json.dumps(finding, ensure_ascii=False, indent=2))
-        raise SystemExit(0)
-print('no evidence-backed report candidate yet')
-raise SystemExit(1)
-PY
+              import json
+              from pathlib import Path
+              payload=json.loads(Path('/tmp/findings.json').read_text())
+              for finding in payload.get('findings') or []:
+                  state=str(finding.get('state') or '')
+                  title=str(finding.get('title') or '').strip()
+                  evidence=finding.get('evidence') or []
+                  if state in {'needs_review','approved','submitted'} and title and evidence:
+                      print(json.dumps(finding, ensure_ascii=False, indent=2))
+                      raise SystemExit(0)
+              print('no evidence-backed report candidate yet')
+              raise SystemExit(1)
+              PY
               then
                 exit 0
               fi
