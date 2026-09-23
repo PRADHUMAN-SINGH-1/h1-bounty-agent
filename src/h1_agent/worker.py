@@ -726,7 +726,13 @@ def run_cycle(
             return summary
 
         try:
-            payload = api.programs(page=1, page_size=25)
+            payload = {"data": []}
+            for catalog_page in range(1, 41):
+                page_payload = api.programs(page=catalog_page, page_size=25)
+                page_data = page_payload.get("data", [])
+                payload["data"].extend(page_data)
+                if len(page_data) < 25:
+                    break
         except HackerOneAPIError as exc:
             summary["status"] = "blocked"
             summary["error"] = str(exc)
