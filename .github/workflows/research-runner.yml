@@ -1,6 +1,5 @@
 name: H1 Research Trigger
 
-# Autonomous hunt loop: trigger the deployed worker, then inspect its persisted findings.
 on:
   schedule:
     - cron: "*/5 * * * *"
@@ -30,48 +29,47 @@ jobs:
       - name: Trigger Render bounty worker
         run: |
           set -euo pipefail
+          accepted=0
           for attempt in $(seq 1 10); do
             response=$(curl --fail-with-body --silent --show-error --max-time 30 \
               -H "Authorization: Bearer $CRON_SECRET" \
               "$H1_AGENT_URL/api/cron")
             echo "$response"
-            if echo "$response" | grep -q '"mode":"autonomous-hunt"'; then
-              break
-            fi
-            if echo "$response" | grep -q '"mode":"queued-job"'; then
-              break
-            fi
+            if echo "$response" | grep -q '"mode":"autonomous-hunt"'; then accepted=1; break; fi
+            if echo "$response" | grep -q '"mode":"queued-job"'; then accepted=1; break; fi
             sleep 30
           done
+          test "$accepted" -eq 1
 
-      - name: Poll for a persisted bounty report
+      - name: Poll for a persisted evidence-backed report
         run: |
-          set -euo pipefail
+          set -u
           for attempt in $(seq 1 36); do
-            response=$(curl --fail-with-body --silent --show-error --max-time 30 \
+            if response=$(curl --fail-with-body --silent --show-error --max-time 30 \
               -H "Authorization: Bearer $CRON_SECRET" \
-              "$H1_AGENT_URL/api/cron/findings")
-            echo "$response" > /tmp/findings.json
-            python - <<'PY'
-            import json
-            from pathlib import Path
-            payload=json.loads(Path('/tmp/findings.json').read_text())
-            findings=payload.get('findings') or []
-            print(f"persisted findings: {len(findings)}")
-            for finding in findings:
-                state=str(finding.get('state') or '')
-                title=str(finding.get('title') or '').strip()
-                evidence=finding.get('evidence') or []
-                if state in {'needs_review','approved','submitted'} and title and evidence:
-                    print(json.dumps(finding, ensure_ascii=False, indent=2))
-                    raise SystemExit(0)
-            raise SystemExit(1)
-            PY
-            if [ $? -eq 0 ]; then
-              echo "A report candidate with evidence was persisted."
-              exit 0
+              "$H1_AGENT_URL/api/cron/findings"); then
+              printf '%s\n' "$response" > /tmp/findings.json
+              if python - <<'PY'
+import json
+from pathlib import Path
+payload=json.loads(Path('/tmp/findings.json').read_text())
+for finding in payload.get('findings') or []:
+    state=str(finding.get('state') or '')
+    title=str(finding.get('title') or '').strip()
+    evidence=finding.get('evidence') or []
+    if state in {'needs_review','approved','submitted'} and title and evidence:
+        print(json.dumps(finding, ensure_ascii=False, indent=2))
+        raise SystemExit(0)
+print('no evidence-backed report candidate yet')
+raise SystemExit(1)
+PY
+              then
+                exit 0
+              fi
+            else
+              echo "finding endpoint not ready yet"
             fi
             sleep 30
           done
-          echo "Autonomous hunt completed its verification window without a persisted evidence-backed report candidate."
+          echo "No evidence-backed report candidate was persisted during the verification window."
           exit 1
