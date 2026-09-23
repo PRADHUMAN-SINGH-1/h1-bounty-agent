@@ -11,6 +11,10 @@ on:
       - "api/index.py"
       - "src/h1_agent/config.py"
 
+concurrency:
+  group: h1-autonomous-hunt
+  cancel-in-progress: true
+
 jobs:
   trigger:
     runs-on: ubuntu-latest
