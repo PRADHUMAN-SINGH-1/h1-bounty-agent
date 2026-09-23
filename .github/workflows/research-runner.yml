@@ -55,6 +55,9 @@ jobs:
           ).replace(
               'summary["mode"] = "autonomous-authorized-active-research"',
               'summary["mode"] = "autonomous-authorized-research"',
+          ).replace(
+              "        try:\n            payload = api.programs(page=1, page_size=25)\n",
+              "        try:\n            payload = {\"data\": []}\n            for catalog_page in range(1, 41):\n                page_payload = api.programs(page=catalog_page, page_size=25)\n                page_data = page_payload.get(\"data\", [])\n                payload[\"data\"].extend(page_data)\n                if len(page_data) < 25:\n                    break\n",
           )
 
           if updated == content:
@@ -62,7 +65,7 @@ jobs:
               raise SystemExit(0)
 
           body = json.dumps({
-              "message": "fix: let autonomous discovery select bounty programs",
+              "message": "fix: exhaust HackerOne program catalog for autonomous discovery",
               "content": base64.b64encode(updated.encode("utf-8")).decode("ascii"),
               "sha": payload["sha"],
               "branch": "main",
