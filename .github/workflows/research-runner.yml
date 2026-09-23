@@ -29,32 +29,48 @@ jobs:
       - name: Trigger Render bounty worker
         run: |
           set -euo pipefail
-          accepted=0
+          response=""
           for attempt in $(seq 1 10); do
             response=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron")
             echo "$response"
-            if echo "$response" | grep -q '"mode":"autonomous-hunt"'; then accepted=1; break; fi
-            if echo "$response" | grep -q '"mode":"queued-job"'; then accepted=1; break; fi
+            job_id=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("job_id", ""))' <<<"$response")
+            if [ -n "$job_id" ]; then
+              printf '%s' "$job_id" > /tmp/research-job-id
+              exit 0
+            fi
             sleep 30
           done
-          test "$accepted" -eq 1
+          echo "The autonomous research trigger did not return a persisted job id."
+          exit 1
 
-      - name: Poll for a persisted evidence-backed report
+      - name: Poll persisted research job and report queue
         run: |
           set -u
+          job_id=$(cat /tmp/research-job-id)
           for attempt in $(seq 1 36); do
-            response=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
-            if printf '%s' "$response" | grep -q '"findings"'; then
-              printf '%s\n' "$response" > /tmp/findings.json
+            job=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/research/jobs/$job_id" 2>/tmp/job.err || true)
+            echo "research job: $job"
+
+            if printf '%s' "$job" | grep -q '"status":"error"'; then
+              echo "Autonomous research job failed."
+              exit 1
+            fi
+
+            findings=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
+            if printf '%s' "$findings" | grep -q '"findings"'; then
+              printf '%s\n' "$findings" > /tmp/findings.json
               if python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("title") or "").strip() and f.get("evidence") for f in p.get("findings") or []); print("evidence-backed report candidate:", ok); raise SystemExit(0 if ok else 1)'; then
                 cat /tmp/findings.json
                 exit 0
               fi
-            else
-              echo "findings endpoint not ready yet"
-              cat /tmp/findings.err || true
+            fi
+
+            status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status", "unknown"))' <<<"$job" 2>/dev/null || echo unknown)
+            if [ "$status" = "completed" ]; then
+              echo "Research completed without an evidence-backed report candidate; the next scheduled run will try again."
+              exit 1
             fi
             sleep 30
           done
-          echo "No evidence-backed report candidate was persisted during the verification window."
+          echo "Research verification window expired without an evidence-backed report candidate."
           exit 1
