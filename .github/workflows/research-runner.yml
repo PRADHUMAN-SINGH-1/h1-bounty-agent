@@ -31,9 +31,7 @@ jobs:
           set -euo pipefail
           accepted=0
           for attempt in $(seq 1 10); do
-            response=$(curl --fail-with-body --silent --show-error --max-time 30 \
-              -H "Authorization: Bearer $CRON_SECRET" \
-              "$H1_AGENT_URL/api/cron")
+            response=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron")
             echo "$response"
             if echo "$response" | grep -q '"mode":"autonomous-hunt"'; then accepted=1; break; fi
             if echo "$response" | grep -q '"mode":"queued-job"'; then accepted=1; break; fi
@@ -45,29 +43,16 @@ jobs:
         run: |
           set -u
           for attempt in $(seq 1 36); do
-            if response=$(curl --fail-with-body --silent --show-error --max-time 30 \
-              -H "Authorization: Bearer $CRON_SECRET" \
-              "$H1_AGENT_URL/api/cron/findings"); then
+            response=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
+            if [ -n "$response" ]; then
               printf '%s\n' "$response" > /tmp/findings.json
-              if python - <<'PY'
-              import json
-              from pathlib import Path
-              payload=json.loads(Path('/tmp/findings.json').read_text())
-              for finding in payload.get('findings') or []:
-                  state=str(finding.get('state') or '')
-                  title=str(finding.get('title') or '').strip()
-                  evidence=finding.get('evidence') or []
-                  if state in {'needs_review','approved','submitted'} and title and evidence:
-                      print(json.dumps(finding, ensure_ascii=False, indent=2))
-                      raise SystemExit(0)
-              print('no evidence-backed report candidate yet')
-              raise SystemExit(1)
-              PY
-              then
+              python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("title") or "").strip() and f.get("evidence") for f in p.get("findings") or []); print("evidence-backed report candidate:" , ok); raise SystemExit(0 if ok else 1)'
+              if [ $? -eq 0 ]; then
+                cat /tmp/findings.json
                 exit 0
               fi
             else
-              echo "finding endpoint not ready yet"
+              cat /tmp/findings.err || true
             fi
             sleep 30
           done
