@@ -68,9 +68,9 @@ The dashboard's **Hunt automatically** workflow is now a real two-stage pipeline
 9. Stores the candidate as `needs_review`.
 10. Requires human approval and current scope validation before submission.
 
-HackerOne's Hacker API documents the program and structured-scope endpoints as paginated; the implementation therefore treats pagination as mandatory rather than assuming the first response is the complete catalog. citeturn2search0
+HackerOne's Hacker API documents the program and structured-scope endpoints as paginated; the implementation therefore treats pagination as mandatory rather than assuming the first response is the complete catalog.
 
-HackerOne's current documentation also exposes program signals such as `offers_bounties`, `open_scope`, and `fast_payments`, while structured scopes expose bounty/submission eligibility and maximum severity. citeturn2search3turn0search4
+HackerOne's current documentation also exposes program signals such as `offers_bounties`, `open_scope`, and `fast_payments`, while structured scopes expose bounty/submission eligibility and maximum severity.
 
 ## Safety and authorization boundaries
 
@@ -83,7 +83,7 @@ HackerOne's current documentation also exposes program signals such as `offers_b
 - Even when submission is enabled, the dashboard requires the finding to be approved and to pass current scope/completeness validation.
 - No credential brute forcing, form submission, destructive actions, or out-of-scope scanning is part of the default deep-research path.
 
-HackerOne's current guidance emphasizes that scope determines which assets can be reported and whether they are bounty eligible; the agent uses those structured-scope fields as hard routing gates. citeturn0search4turn0search3
+HackerOne's current guidance emphasizes that scope determines which assets can be reported and whether they are bounty eligible; the agent uses those structured-scope fields as hard routing gates.
 
 ## Research engine
 
@@ -115,6 +115,14 @@ Deep research currently includes:
 - evidence-grounded LLM triage and report drafting
 
 Informational observations are deliberately not promoted into bounty findings by themselves. The LLM is instructed to require security-relevant evidence and to keep uncertain claims in `needs_review`/`no_finding` states.
+
+## Resilience and bounded execution
+
+- **Postgres schema migration/retry hardening** protects long-lived Render deployments and dashboard queue reads.
+- Deep toolchain subprocesses have bounded execution time; a slow `httpx`, `katana`, `nuclei`, or passive discovery process cannot hold a research job indefinitely.
+- Toolchain target counts are bounded so a large scope cannot silently expand a single research job into hundreds of targets.
+- Evidence collection is treated as a partial-progress stage: a tool timeout is recorded as research telemetry and does not erase evidence already collected.
+- The dashboard reports the actual research-job error rather than displaying a generic `Unknown error`.
 
 ## Deployment
 
@@ -164,6 +172,11 @@ DEEP_MAX_PAGES=30
 DEEP_MAX_PAGE_LINKS=80
 TOOLCHAIN_ENABLED=true
 TOOLCHAIN_MAX_ROOTS=10
+TOOLCHAIN_MAX_TARGETS=50
+TOOLCHAIN_HTTPX_TIMEOUT_SECONDS=120
+TOOLCHAIN_KATANA_TIMEOUT_SECONDS=180
+TOOLCHAIN_NUCLEI_TIMEOUT_SECONDS=180
+RESEARCH_TARGET_TIMEOUT_SECONDS=180
 ```
 
 LLM configuration for a hosted deployment can use the configured OpenAI-compatible provider/Vercel gateway; local development can use Ollama.
