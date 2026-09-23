@@ -780,7 +780,7 @@ def run_cycle(
             allowlist = set(settings.research_program_allowlist)
             summary["mode"] = "autonomous-passive-research"
             for opportunity, _scopes in ranked[: settings.autonomous_max_programs]:
-                if opportunity.handle not in allowlist:
+                if allowlist and opportunity.handle not in allowlist:
                     continue
                 result = _research_program(
                     settings,
@@ -816,7 +816,7 @@ def run_cycle(
             return summary
 
         for opportunity, scopes in ranked[: settings.autonomous_max_programs]:
-            if opportunity.handle not in allowlist:
+            if allowlist and opportunity.handle not in allowlist:
                 continue
 
             targets = _select_targets(
@@ -836,7 +836,7 @@ def run_cycle(
 
                 engine = LowImpactResearch(settings, scopes)
                 try:
-                    results = engine.run(target, active=True)
+                    results = engine.run(target, active=settings.allow_active_tests)
                 except Exception as exc:
                     summary["skipped"].append(
                         {"program": opportunity.handle, "target": target, "reason": str(exc)}
@@ -909,7 +909,7 @@ def run_cycle(
                     }
                 )
 
-        summary["mode"] = "autonomous-authorized-active-research"
+        summary["mode"] = "autonomous-authorized-research"
         return summary
 
     except Exception as exc:
