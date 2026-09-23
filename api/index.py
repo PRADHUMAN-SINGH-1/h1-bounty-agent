@@ -474,6 +474,60 @@ def _run_research_job_background(job_id: str, programs: list[str], mode: str) ->
         store.close()
 
 
+@app.post("/api/discovery/jobs")
+async def start_discovery_job(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_action_token: str | None = Header(default=None),
+) -> JSONResponse:
+    _require_session(request)
+    _verify_action_token(x_action_token)
+
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+
+    store = Store(Settings())
+    try:
+        job_id = store.create_research_job({"programs": [], "mode": "discovery"})
+    finally:
+        store.close()
+
+    background_tasks.add_task(
+        _run_research_job_background,
+        job_id,
+        [],
+        "discovery",
+    )
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "queued",
+            "job_id": job_id,
+            "mode": "discovery",
+        },
+    )
+
+
+@app.get("/api/discovery/jobs/{job_id}")
+def get_discovery_job(job_id: str, request: Request) -> dict[str, Any]:
+    _require_session(request)
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+
+    store = Store(Settings())
+    try:
+        try:
+            result = store.get_research_job(job_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        if result.get("mode") != "discovery":
+            raise HTTPException(status_code=400, detail="Job is not a discovery job.")
+        return result
+    finally:
+        store.close()
+
+
 @app.post("/api/research/jobs")
 async def start_research_job(
     request: Request,
@@ -542,44 +596,62 @@ def get_research_job(job_id: str, request: Request) -> dict[str, Any]:
 
 
 @app.post("/api/worker")
-async def worker(request: Request, x_action_token: str | None = Header(default=None)) -> dict[str, Any]:
+async def worker(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_action_token: str | None = Header(default=None),
+) -> JSONResponse:
+    """Compatibility endpoint that always queues work; it never executes a long cycle in the request."""
     _require_session(request)
     _verify_action_token(x_action_token)
+
+    body: dict[str, Any] = {}
     try:
-        from h1_agent.config import Settings
-        from h1_agent.worker import run_cycle
+        parsed = await request.json()
+        if isinstance(parsed, dict):
+            body = parsed
+    except Exception:
+        body = {}
 
-        requested_programs: set[str] | None = None
-        active = False
-        mode = ""
-        try:
-            body = await request.json()
-            if isinstance(body, dict) and isinstance(body.get("programs"), list):
-                requested_programs = {
-                    str(handle).strip()
-                    for handle in body["programs"]
-                    if str(handle).strip()
-                } or None
-            if isinstance(body, dict):
-                active = bool(body.get("active", False))
-                mode = str(body.get("mode", "") or "").strip().lower()
-        except Exception:
-            requested_programs = None
-            active = False
-            mode = ""
+    requested_programs = sorted({
+        str(handle).strip()
+        for handle in body.get("programs", [])
+        if str(handle).strip()
+    })
+    active = bool(body.get("active", False))
+    mode = str(body.get("mode", "") or "").strip().lower()
 
-        return run_cycle(
-            Settings(),
-            requested_programs=requested_programs,
-            active=active,
-            mode=mode,
-        )
-    except Exception as exc:
-        return {
-            "status": "error",
-            "error_type": "endpoint",
-            "error": f"{exc.__class__.__name__}: {exc}",
-        }
+    if requested_programs:
+        job_mode = mode if mode in {"full", "deep", "deep-research", "active", "assessment", "passive"} else "full"
+        programs_for_job = requested_programs
+    else:
+        job_mode = "discovery"
+        programs_for_job = []
+
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+
+    store = Store(Settings())
+    try:
+        job_id = store.create_research_job({"programs": programs_for_job, "mode": job_mode})
+    finally:
+        store.close()
+
+    background_tasks.add_task(
+        _run_research_job_background,
+        job_id,
+        programs_for_job,
+        "active" if active and job_mode == "active" else job_mode,
+    )
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "queued",
+            "job_id": job_id,
+            "mode": job_mode,
+            "programs": programs_for_job,
+        },
+    )
 
 
 
@@ -648,11 +720,11 @@ def cron(
             "job_id": str(queued["id"]),
         }
 
-    # No manually queued job: perform autonomous discovery as a scheduled full hunt.
-    background_tasks.add_task(
-        _run_autonomous_research_background,
-    )
+    if settings.autonomous_research:
+        background_tasks.add_task(_run_autonomous_research_background)
+        return {"status": "accepted", "mode": "autonomous-hunt"}
+
     return {
-        "status": "accepted",
-        "mode": "autonomous-hunt",
+        "status": "idle",
+        "mode": "no-queued-job",
     }

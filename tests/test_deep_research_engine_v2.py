@@ -45,6 +45,9 @@ def test_async_job_api_exists():
     assert '@app.post("/api/research/jobs")' in source
     assert '@app.get("/api/research/jobs/{job_id}")' in source
     assert "create_research_job" in source
+    assert '@app.post("/api/discovery/jobs")' in source
+    assert '@app.get("/api/discovery/jobs/{job_id}")' in source
+    assert '@app.post("/api/worker")' in source
     assert "BackgroundTasks" in source
     assert "_run_research_job_background" in source
     assert "background_tasks.add_task" in source

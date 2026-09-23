@@ -155,12 +155,27 @@ async function approve(id){
   }catch(e){alert(e.message)}
 }
 async function scanPrograms(){
-  const b=document.getElementById("run"); const s=document.getElementById("scanBtn"); b.disabled=true; s.disabled=true; b.textContent="Finding programs…"; s.textContent="Finding programs…";
+  const b=document.getElementById("run");
+  const s=document.getElementById("scanBtn");
+  b.disabled=true;
+  s.disabled=true;
+  b.textContent="Finding programs…";
+  s.textContent="Finding programs…";
   try{
-    const d=await request("/api/worker",{method:"POST",body:JSON.stringify({})});
-    renderPrograms(d.top_opportunities||[]);
-  }catch(e){alert(e.message)}
-  finally{b.disabled=false;s.disabled=false;b.textContent="Hunt automatically";s.textContent="Scan Programs"}
+    const queued=await request("/api/discovery/jobs",{method:"POST",body:"{}"});
+    document.getElementById("researchStatus").textContent="Program discovery queued: "+queued.job_id+"…";
+    const result=await pollDiscoveryJob(queued.job_id);
+    renderPrograms((result.top_opportunities||[]));
+  }catch(e){
+    document.getElementById("researchStatus").textContent="Program discovery failed: "+e.message;
+    document.getElementById("researchStatus").className="err";
+    alert(e.message);
+  }finally{
+    b.disabled=false;
+    s.disabled=false;
+    b.textContent="Hunt automatically";
+    s.textContent="Scan Programs";
+  }
 }
 
 async function huntAutomatically(){
@@ -168,10 +183,12 @@ async function huntAutomatically(){
   const b=document.getElementById("run");
   b.disabled=true;
   b.textContent="Finding bounty candidates…";
-  status.textContent="Loading current HackerOne programs and queuing the strongest eligible research targets…";
+  status.textContent="Discovering current HackerOne programs in the background…";
+  status.className="muted";
   try{
-    const discovery=await request("/api/worker",{method:"POST",body:JSON.stringify({})});
-    const programs=(discovery.top_opportunities||[]).slice(0,5);
+    const discovery=await request("/api/discovery/jobs",{method:"POST",body:"{}"});
+    const result=await pollDiscoveryJob(discovery.job_id);
+    const programs=(result.top_opportunities||[]).slice(0,5);
     if(!programs.length){
       status.textContent="No eligible programs were returned by HackerOne.";
       return;
@@ -184,8 +201,8 @@ async function huntAutomatically(){
         mode:"full"
       })
     });
-    status.textContent="Bounty hunt queued: "+queued.job_id+"\nPrograms: "+programs.map(function(p){return p.handle}).join(", ")+"\nThe GitHub research runner will process them in the background.";
-    if(queued.job_id) await pollResearchJob(queued.job_id);
+    status.textContent="Bounty hunt queued: "+queued.job_id+"\nPrograms: "+programs.map(function(p){return p.handle}).join(", ")+"\nResearch is running in the background.";
+    await pollResearchJob(queued.job_id);
   }catch(e){
     status.textContent="Automatic bounty hunt failed: "+e.message;
     status.className="err";
@@ -193,6 +210,32 @@ async function huntAutomatically(){
   }finally{
     b.disabled=false;
     b.textContent="Hunt automatically";
+  }
+}
+
+async function pollDiscoveryJob(jobId){
+  const status=document.getElementById("researchStatus");
+  const started=Date.now();
+  const timeoutMs=20*60*1000;
+  for(;;){
+    const job=await request("/api/discovery/jobs/"+encodeURIComponent(jobId));
+    if(job.status==="queued"){
+      status.textContent="Program discovery queued…\nJob: "+jobId;
+    }else if(job.status==="running"){
+      const p=job.progress||{};
+      status.textContent=[
+        "Program discovery running",
+        "Job: "+jobId,
+        "Program: "+(p.program||"—"),
+        "Progress: "+(p.completed_targets||0)+"/"+(p.planned_targets||"—")+" programs"
+      ].join("\n");
+    }else if(job.status==="completed"){
+      return job.result||{};
+    }else if(job.status==="error"){
+      throw new Error(job.error||"Discovery job failed.");
+    }
+    if(Date.now()-started>timeoutMs) throw new Error("Discovery job timed out; the worker may still be processing it.");
+    await new Promise(function(resolve){setTimeout(resolve,4000);});
   }
 }
 

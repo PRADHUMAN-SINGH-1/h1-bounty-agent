@@ -1,13 +1,6 @@
 from pathlib import Path
 
 
-def test_research_runner_exists():
-    text = Path("scripts/research_runner.py").read_text(encoding="utf-8")
-    assert "claim_next_research_job" in text
-    assert "run_cycle" in text
-    assert "status" in text
-
-
 def test_research_jobs_are_queued_without_render_background_execution():
     text = Path("api/index.py").read_text(encoding="utf-8")
     start = text.index('@app.post("/api/research/jobs")')

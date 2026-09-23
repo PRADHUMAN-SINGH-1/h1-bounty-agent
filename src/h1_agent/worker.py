@@ -35,34 +35,6 @@ def _target_for_asset(asset) -> str | None:
     return None
 
 
-def _select_targets(scopes, max_targets: int, *, exhaustive: bool = False):
-    seen: set[str] = set()
-    targets = []
-    ordered = sorted(
-        scopes,
-        key=lambda asset: (
-            0 if asset.eligible_for_bounty else 1,
-            0 if str(asset.asset_type).upper() == "URL" else 1,
-            str(asset.asset_identifier).lower(),
-        ),
-    )
-    for asset in ordered:
-        if not asset.eligible_for_submission or not asset.eligible_for_bounty:
-            continue
-        if asset.instruction:
-            continue
-        target = _target_for_asset(asset)
-        if not target or target in seen:
-            continue
-        seen.add(target)
-        targets.append((asset, target))
-        if not exhaustive and len(targets) >= max_targets:
-            break
-        if exhaustive and len(targets) >= max_targets:
-            break
-    return targets
-
-
 def _select_research_assets(scopes, max_assets: int, *, exhaustive: bool = False):
     seen: set[str] = set()
     assets = []
