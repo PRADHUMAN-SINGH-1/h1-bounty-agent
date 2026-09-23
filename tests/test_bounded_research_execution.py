@@ -8,6 +8,7 @@ def test_research_target_deadline_is_enforced():
     assert "self._deadline" in source
     assert "research_target_timeout_seconds" in source
     assert "_request_timeout" in source
+    assert "max(30, self.settings.research_target_timeout_seconds)" in source
 
 
 def test_worker_passes_toolchain_limits_and_reports_phases():
