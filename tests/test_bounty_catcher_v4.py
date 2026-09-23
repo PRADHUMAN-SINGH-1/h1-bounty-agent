@@ -56,5 +56,5 @@ def test_findings_and_approval_buttons_use_real_finding_id():
     html = Path("public/index.html").read_text(encoding="utf-8")
     assert 'data-view-id="${x.id}"' not in html
     assert 'data-approve-id="${x.id}"' not in html
-    assert "data-view-id=\"\'+esc(x.id)+\'\"" in html
-    assert "data-approve-id=\"\'+esc(x.id)+\'\"" in html
+    assert 'data-view-id="'+esc(x.id)+'"' in html
+    assert 'data-approve-id="'+esc(x.id)+'"' in html
