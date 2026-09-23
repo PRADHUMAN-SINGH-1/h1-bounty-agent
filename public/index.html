@@ -196,10 +196,7 @@ async function huntAutomatically(){
     renderPrograms(programs);
     const queued=await request("/api/research/jobs",{
       method:"POST",
-      body:JSON.stringify({
-        programs:programs.map(function(p){return p.handle}),
-        mode:"full"
-      })
+      body:JSON.stringify({programs:programs.map(function(p){return p.handle}),mode:"full"})
     });
     status.textContent="Bounty hunt queued: "+queued.job_id+"\nPrograms: "+programs.map(function(p){return p.handle}).join(", ")+"\nResearch is running in the background.";
     await pollResearchJob(queued.job_id);
@@ -223,12 +220,7 @@ async function pollDiscoveryJob(jobId){
       status.textContent="Program discovery queued…\nJob: "+jobId;
     }else if(job.status==="running"){
       const p=job.progress||{};
-      status.textContent=[
-        "Program discovery running",
-        "Job: "+jobId,
-        "Program: "+(p.program||"—"),
-        "Progress: "+(p.completed_targets||0)+"/"+(p.planned_targets||"—")+" programs"
-      ].join("\n");
+      status.textContent=["Program discovery running","Job: "+jobId,"Program: "+(p.program||"—"),"Progress: "+(p.completed_targets||0)+"/"+(p.planned_targets||"—")+" programs"].join("\n");
     }else if(job.status==="completed"){
       return job.result||{};
     }else if(job.status==="error"){
@@ -255,12 +247,7 @@ function renderPrograms(programs){
       </div>
     </div>`;
   }).join("");
-
-  root.querySelectorAll("[data-full-research-handle]").forEach(function(btn){
-    btn.addEventListener("click", function(){
-      runFullResearch(btn.getAttribute("data-full-research-handle"));
-    });
-  });
+  root.querySelectorAll("[data-full-research-handle]").forEach(function(btn){btn.addEventListener("click",function(){runFullResearch(btn.getAttribute("data-full-research-handle"));});});
 }
 
 async function runFullResearch(handle){
@@ -268,12 +255,8 @@ async function runFullResearch(handle){
   status.textContent="Starting bounty hunt for "+handle+"…";
   status.className="muted";
   document.querySelectorAll("[data-full-research-handle]").forEach(function(btn){btn.disabled=true;});
-
   try{
-    const queued=await request("/api/research/jobs",{
-      method:"POST",
-      body:JSON.stringify({programs:[handle],mode:"full"})
-    });
+    const queued=await request("/api/research/jobs",{method:"POST",body:JSON.stringify({programs:[handle],mode:"full"})});
     status.textContent="Hunt job "+queued.job_id+" queued. Searching the authorized scope in the background…";
     await pollResearchJob(queued.job_id);
   }catch(e){
@@ -287,30 +270,28 @@ async function runFullResearch(handle){
 
 async function pollResearchJob(jobId){
   const status=document.getElementById("researchStatus");
+  const started=Date.now();
+  const timeoutMs=30*60*1000;
   for(;;){
     const job=await request("/api/research/jobs/"+encodeURIComponent(jobId));
     const p=job.progress||{};
     const pct=p.planned_targets ? Math.floor((100*p.completed_targets)/p.planned_targets) : 0;
+    const phase=p.phase||"running";
+    const detail=p.detail||"Working";
     if(job.status==="queued"){
-      status.textContent="Job "+jobId+" queued…";
+      status.textContent=["Research queued","Job: "+jobId].join("\n");
     }else if(job.status==="running"){
-      status.textContent=[
-        "Deep research running",
-        "Job: "+jobId,
-        "Program: "+(p.program||"—"),
-        "Target: "+(p.target||"—"),
-        "Progress: "+(p.completed_targets||0)+"/"+(p.planned_targets||"—")+" targets ("+pct+"%)",
-        "Evidence collected on last target: "+(p.evidence_collected||0)
-      ].join("\n");
+      status.textContent=["Bounty research running","Job: "+jobId,"Phase: "+phase,"Detail: "+detail,"Program: "+(p.program||"—"),"Target: "+(p.target||"—"),"Progress: "+(p.completed_targets||0)+"/"+(p.planned_targets||"—")+" targets ("+pct+"%)","Evidence collected: "+(p.evidence_collected||0)].join("\n");
     }else if(job.status==="completed"){
       renderResult(job.result||{status:"ok"});
-      return;
+      return job.result||{};
     }else if(job.status==="error"){
       const detail=job.error || ((job.result||{}).error) || "Research job failed without a reported error.";
       status.textContent="Deep research job failed: "+detail;
       status.className="err";
       return;
     }
+    if(Date.now()-started>timeoutMs) throw new Error("Research job exceeded the dashboard timeout; inspect the worker error/progress instead of waiting indefinitely.");
     await new Promise(function(resolve){setTimeout(resolve,3000);});
   }
 }
@@ -336,19 +317,14 @@ function renderResult(d){
   alert(lines.join("\n"));
 }
 
-async function runWorker(){
-  await scanPrograms();
-}
+async function runWorker(){await scanPrograms();}
 async function logout(){
   try{await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin"})}catch(e){}
   token=""; connected=false;
   document.getElementById("app").classList.add("hidden");
   document.getElementById("login").classList.remove("hidden");
 }
-// Guard against regressions: all UI actions are wired with addEventListener.
-if (document.querySelector("[onclick]")) {
-  console.warn("Dashboard contains an inline event handler; use addEventListener instead.");
-}
+if (document.querySelector("[onclick]")) {console.warn("Dashboard contains an inline event handler; use addEventListener instead.");}
 </script>
 </body>
 </html>
