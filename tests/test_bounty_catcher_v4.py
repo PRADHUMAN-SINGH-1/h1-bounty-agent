@@ -54,5 +54,5 @@ def test_research_runner_does_not_require_llm_token_for_evidence_collection():
 
 def test_findings_view_button_uses_real_finding_id():
     html = Path("public/index.html").read_text(encoding="utf-8")
-    assert 'data-view-id="'+esc(x.id)+'"' not in html
-    assert 'data-view-id="\'+esc(x.id)\'+"' in html
+    assert 'data-view-id="${x.id}"' not in html
+    assert 'data-view-id="\'+esc(x.id)+\'"' in html
