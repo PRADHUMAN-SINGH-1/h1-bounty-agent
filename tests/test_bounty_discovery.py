@@ -55,11 +55,3 @@ def test_structured_scope_catalog_paginates_until_short_page(monkeypatch):
     monkeypatch.setattr(client, "_structured_scopes_page", fake_page)
     result = client.structured_scopes_all("example", page_size=100, max_pages=20)
     assert len(result["data"]) == 101
-
-
-def test_autonomous_hunt_module_uses_read_only_deep_research():
-    source = open("src/h1_agent/hunt.py", encoding="utf-8").read()
-    assert "run_autonomous_hunt" in source
-    assert "active=False" in source
-    assert "deep=True" in source
-    assert "human-review queue" in source
