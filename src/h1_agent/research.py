@@ -60,11 +60,23 @@ class LowImpactResearch:
         self.settings = settings
         self.scopes = scopes
         self.last_request = 0.0
+        self._deadline: float | None = None
         self.client = httpx.Client(
             follow_redirects=False,
             timeout=12,
             headers={"User-Agent": settings.user_agent},
         )
+
+    def _remaining(self) -> float:
+        if self._deadline is None:
+            return 12.0
+        return self._deadline - time.monotonic()
+
+    def _request_timeout(self) -> float:
+        remaining = self._remaining()
+        if remaining <= 0:
+            raise httpx.ReadTimeout("research target deadline exceeded")
+        return max(0.25, min(12.0, remaining))
 
     def close(self) -> None:
         self.client.close()
@@ -72,21 +84,24 @@ class LowImpactResearch:
     def _wait(self) -> None:
         interval = 1 / max(self.settings.requests_per_second, 0.1)
         remaining = interval - (time.monotonic() - self.last_request)
+        if self._deadline is not None and self._remaining() <= 0:
+            raise httpx.ReadTimeout("research target deadline exceeded")
         if remaining > 0:
-            time.sleep(remaining)
+            time.sleep(min(remaining, self._remaining()))
         self.last_request = time.monotonic()
 
     def _get(self, url: str, **kwargs) -> httpx.Response:
         self._wait()
+        kwargs.setdefault("timeout", self._request_timeout())
         return self.client.get(url, **kwargs)
 
     def _options(self, url: str) -> httpx.Response:
         self._wait()
-        return self.client.options(url)
+        return self.client.options(url, timeout=self._request_timeout())
 
     def _head(self, url: str) -> httpx.Response:
         self._wait()
-        return self.client.head(url, follow_redirects=False)
+        return self.client.head(url, follow_redirects=False, timeout=self._request_timeout())
 
     def run(
         self,
@@ -96,6 +111,7 @@ class LowImpactResearch:
         deep: bool = False,
     ) -> list[CheckResult]:
         asset = require_in_scope(target, self.scopes)
+        self._deadline = time.monotonic() + max(30, self.settings.research_target_timeout_seconds)
         if active and not self.settings.allow_active_tests:
             raise PermissionError(
                 "Active testing is disabled. Set ALLOW_ACTIVE_TESTS=true only after reviewing program policy."

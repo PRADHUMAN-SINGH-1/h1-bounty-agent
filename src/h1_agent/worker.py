@@ -193,10 +193,23 @@ def _research_program(
                 roots.append(candidate)
         if roots:
             try:
+                if on_progress:
+                    on_progress({
+                        "program": handle,
+                        "target": None,
+                        "phase": "finding_evidence",
+                        "detail": f"Running bounded discovery toolchain across {len(roots)} scoped roots",
+                        "planned_targets": len(selected_assets),
+                        "completed_targets": 0,
+                    })
                 program_tool_evidence, toolchain_runs = run_deep_toolchain(
                     roots,
                     scopes,
                     max_roots=settings.toolchain_max_roots,
+                    max_targets=settings.toolchain_max_targets,
+                    httpx_timeout=settings.toolchain_httpx_timeout_seconds,
+                    katana_timeout=settings.toolchain_katana_timeout_seconds,
+                    nuclei_timeout=settings.toolchain_nuclei_timeout_seconds,
                     active=active,
                 )
                 result["checks_run"] += len(toolchain_runs)
@@ -245,6 +258,15 @@ def _research_program(
         evidence: list[Evidence] = []
 
         if target.startswith(("http://", "https://")) and asset.asset_type.upper() in {"URL", "DOMAIN", "WILDCARD", "WEB", "WEBSITE"}:
+            if on_progress:
+                on_progress({
+                    "program": handle,
+                    "target": target,
+                    "phase": "finding_evidence",
+                    "detail": f"Collecting bounded HTTP evidence (max {settings.research_target_timeout_seconds}s)",
+                    "planned_targets": len(selected_assets),
+                    "completed_targets": index - 1,
+                })
             engine = LowImpactResearch(settings, scopes)
             try:
                 evidence_results = engine.run(target, active=active, deep=deep)
@@ -352,6 +374,17 @@ def _research_program(
             )
             continue
 
+        if on_progress:
+            on_progress({
+                "program": handle,
+                "target": target,
+                "phase": "triaging_evidence",
+                "detail": f"Evaluating {len(evidence_json)} evidence items",
+                "planned_targets": len(selected_assets),
+                "completed_targets": index,
+                "evidence_collected": len(evidence_json),
+            })
+
         try:
             triage = llm.triage_evidence(
                 handle,
@@ -377,6 +410,17 @@ def _research_program(
         except Exception as exc:
             leads = []
             result["skipped"].append(f"{target}: evidence triage failed; continuing with direct synthesis: {exc}")
+
+        if on_progress:
+            on_progress({
+                "program": handle,
+                "target": target,
+                "phase": "drafting_report",
+                "detail": "Building an evidence-grounded candidate report",
+                "planned_targets": len(selected_assets),
+                "completed_targets": index,
+                "evidence_collected": len(evidence_json),
+            })
 
         try:
             draft = llm.draft_finding(
