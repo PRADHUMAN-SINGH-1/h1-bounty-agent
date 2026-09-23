@@ -10,7 +10,6 @@ on:
       - "render.yaml"
       - "api/index.py"
       - "src/h1_agent/config.py"
-      - "src/h1_agent/worker.py"
 
 jobs:
   trigger:
