@@ -1,6 +1,7 @@
 name: H1 Research Trigger
 
 # Autonomous hunt loop: trigger the deployed worker, then inspect its persisted job state.
+# Triggered manually by a repository update when an end-to-end hunt verification is requested.
 on:
   schedule:
     - cron: "*/5 * * * *"
