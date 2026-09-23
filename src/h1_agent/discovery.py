@@ -23,6 +23,8 @@ class Opportunity:
     @property
     def score(self) -> float:
         # Triage signal only; this is not a prediction of bounty income.
+        if self.bounty_assets <= 0:
+            return -1_000_000.0
         web_signal = min(self.web_assets, 20) * 1.5
         severity_signal = min(self.max_severity_assets, 20) * 1.0
         bounty_signal = self.bounty_assets * 5
