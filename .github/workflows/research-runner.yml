@@ -70,6 +70,65 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
           nuclei -update-templates -silent || true
 
+      - name: Validate DATABASE secret
+        run: test -n "$DATABASE_URL"
+
+      - name: Validate HackerOne username secret
+        run: test -n "$HACKERONE_USERNAME"
+
+      - name: Validate HackerOne API token secret
+        run: test -n "$HACKERONE_API_TOKEN"
+
+      - name: Report optional LLM token status
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::warning::HF_TOKEN is not configured. Research will collect evidence but skip LLM candidate drafting."
+          else
+            echo "HF_TOKEN is configured."
+          fi
+
+      - name: Install security tooling
+        run: |
+          set -euo pipefail
+          go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install github.com/projectdiscovery/katana/cmd/katana@latest
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          go install github.com/tomnomnom/waybackurls@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          nuclei -update-templates -silent || true
+
+      - name: Validate runner secrets
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "$DATABASE_URL" ] || missing+=(RESEARCH_DATABASE_URL)
+          [ -n "$HACKERONE_USERNAME" ] || missing+=(HACKERONE_USERNAME)
+          [ -n "$HACKERONE_API_TOKEN" ] || missing+=(HACKERONE_API_TOKEN)
+
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required GitHub Actions secret(s): ${missing[*]}"
+            echo "Configure these repository secrets before queued research can execute."
+            exit 1
+          fi
+
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::warning::HF_TOKEN is not configured. Research will collect evidence but skip LLM candidate drafting."
+          fi
+
+      - name: Install security tooling
+        run: |
+          set -euo pipefail
+          go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install github.com/projectdiscovery/katana/cmd/katana@latest
+          go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          go install github.com/lc/gau/v2/cmd/gau@latest
+          go install github.com/tomnomnom/waybackurls@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+          nuclei -update-templates -silent || true
+
       - name: Validate runner secrets
         run: |
           set -euo pipefail
