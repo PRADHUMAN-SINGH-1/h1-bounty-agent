@@ -75,3 +75,19 @@ def test_research_run_exposes_trace_and_no_finding_reason():
     assert '"research_trace"' in worker
     assert "LLM evaluation returned status=" in worker
     assert "research_trace.checks" in dashboard
+
+
+
+def test_research_job_errors_are_propagated_to_dashboard():
+    api = (REPO / "api" / "index.py").read_text(encoding="utf-8")
+    dashboard = (REPO / "public" / "index.html").read_text(encoding="utf-8")
+    assert '"error": job_error' in api
+    assert '"Research job failed without a reported error."' in api
+    assert '((job.result||{}).error)' in dashboard
+
+
+def test_llm_weakness_id_is_normalized_before_persistence():
+    worker = (REPO / "src" / "h1_agent" / "worker.py").read_text(encoding="utf-8")
+    assert "def _coerce_optional_int" in worker
+    assert 'weakness_id = _coerce_optional_int(draft.get("weakness_id"))' in worker
+    assert '"weakness_id": weakness_id' in worker
