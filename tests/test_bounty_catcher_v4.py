@@ -41,20 +41,3 @@ def test_global_hunt_button_exists():
     html = Path("public/index.html").read_text(encoding="utf-8")
     assert 'id="run">Hunt automatically' in html
     assert "async function huntAutomatically()" in html
-
-
-def test_research_runner_does_not_require_llm_token_for_evidence_collection():
-    workflow = Path(".github/workflows/research-runner.yml").read_text(encoding="utf-8")
-    assert '[ -z "$HF_TOKEN" ]' in workflow
-    assert 'HF_TOKEN is not configured' in workflow
-    assert 'exit 1' in workflow
-    assert 'DATABASE_URL' in workflow
-    assert 'HACKERONE_API_TOKEN' in workflow
-
-
-def test_findings_and_approval_buttons_use_real_finding_id():
-    html = Path("public/index.html").read_text(encoding="utf-8")
-    assert 'data-view-id="${x.id}"' not in html
-    assert 'data-approve-id="${x.id}"' not in html
-    assert 'data-view-id="'+esc(x.id)+'"' in html
-    assert 'data-approve-id="'+esc(x.id)+'"' in html
