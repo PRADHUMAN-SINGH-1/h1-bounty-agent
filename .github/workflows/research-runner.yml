@@ -40,9 +40,27 @@ jobs:
       DEEP_MAX_WEBSOCKET_ENDPOINTS: "10"
       DEEP_MAX_PAGES: "30"
       DEEP_MAX_PAGE_LINKS: "80"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate DATABASE secret
+        run: test -n "$DATABASE_URL"
+
+      - name: Validate HackerOne username secret
+        run: test -n "$HACKERONE_USERNAME"
+
+      - name: Validate HackerOne API token secret
+        run: test -n "$HACKERONE_API_TOKEN"
+
+      - name: Report optional LLM token status
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::warning::HF_TOKEN is not configured. Research will collect evidence but skip LLM candidate drafting."
+          else
+            echo "HF_TOKEN is configured."
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -69,24 +87,6 @@ jobs:
           go install github.com/tomnomnom/waybackurls@latest
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
           nuclei -update-templates -silent || true
-
-      - name: Validate runner secrets
-        run: |
-          set -euo pipefail
-          missing=()
-          [ -n "$DATABASE_URL" ] || missing+=(RESEARCH_DATABASE_URL)
-          [ -n "$HACKERONE_USERNAME" ] || missing+=(HACKERONE_USERNAME)
-          [ -n "$HACKERONE_API_TOKEN" ] || missing+=(HACKERONE_API_TOKEN)
-
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "Missing required GitHub Actions secret(s): ${missing[*]}"
-            echo "Configure these repository secrets before queued research can execute."
-            exit 1
-          fi
-
-          if [ -z "$HF_TOKEN" ]; then
-            echo "::warning::HF_TOKEN is not configured. Research will collect evidence but skip LLM candidate drafting."
-          fi
 
       - name: Run one queued research job
         run: python scripts/research_runner.py
