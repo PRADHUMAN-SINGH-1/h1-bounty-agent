@@ -31,7 +31,7 @@ def _write_state(state: dict[str, Any]) -> None:
 
 def _normalize_credential(value: str) -> str:
     value = unicodedata.normalize("NFKC", value)
-    value = value.replace("\\r", "").replace("\\n", "").strip()
+    value = value.replace("\r", "").replace("\n", "").strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"\"", "'"}:
         value = value[1:-1]
     return value
@@ -203,11 +203,25 @@ def cron_findings(authorization: str | None = Header(default=None)) -> dict[str,
     store = Store(Settings())
     try:
         rows = store.list_findings()
-        return {
-            "status": "ok",
-            "count": len(rows),
-            "findings": rows,
-        }
+        return {"status": "ok", "count": len(rows), "findings": rows}
+    finally:
+        store.close()
+
+
+@app.get("/api/cron/research/jobs/{job_id}")
+def cron_research_job(job_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Runner-only research-job status path; keeps autonomous execution observable without dashboard credentials."""
+    _verify_cron_secret(authorization)
+    from h1_agent.config import Settings
+    from h1_agent.store import Store
+    store = Store(Settings())
+    try:
+        result = store.get_research_job(job_id)
+        if result.get("status") == "error" and not result.get("error"):
+            payload = result.get("result") or {}
+            failures = [f"{item.get('program')}: {item.get('error')}" for item in payload.get("program_results", []) if item.get("error")]
+            result["error"] = payload.get("error") or (" | ".join(failures) if failures else "Research job failed without a reported error.")
+        return result
     finally:
         store.close()
 
@@ -299,18 +313,8 @@ def programs(request: Request) -> dict[str, Any]:
         api.close()
 
 
-def _run_autonomous_research_background() -> None:
-    from h1_agent.config import Settings
-    from h1_agent.store import Store
-    from h1_agent.worker import run_cycle
-    settings = Settings()
-    store = Store(settings)
-    try:
-        result = run_cycle(settings, mode="full")
-        if result.get("status") == "error":
-            return
-    finally:
-        store.close()
+def _run_autonomous_research_background(job_id: str) -> None:
+    _run_research_job_background(job_id, [], "full")
 
 
 def _run_research_job_background(job_id: str, programs: list[str], mode: str) -> None:
@@ -473,12 +477,16 @@ def cron(background_tasks: BackgroundTasks, authorization: str | None = Header(d
     store = Store(settings)
     try:
         queued = store.claim_next_research_job()
+        if queued:
+            job_id = str(queued["id"])
+            programs = [str(item) for item in queued.get("programs", [])]
+            mode = str(queued.get("mode") or "full")
+            background_tasks.add_task(_run_research_job_background, job_id, programs, mode)
+            return {"status": "accepted", "mode": "queued-job", "job_id": job_id}
+        if settings.autonomous_research:
+            job_id = store.create_research_job({"programs": [], "mode": "full", "source": "autonomous-cron"})
+            background_tasks.add_task(_run_autonomous_research_background, job_id)
+            return {"status": "accepted", "mode": "autonomous-hunt", "job_id": str(job_id)}
+        return {"status": "idle", "mode": "no-queued-job"}
     finally:
         store.close()
-    if queued:
-        background_tasks.add_task(_run_research_job_background, str(queued["id"]), [str(item) for item in queued.get("programs", [])], str(queued.get("mode") or "full"))
-        return {"status": "accepted", "mode": "queued-job", "job_id": str(queued["id"])}
-    if settings.autonomous_research:
-        background_tasks.add_task(_run_autonomous_research_background)
-        return {"status": "accepted", "mode": "autonomous-hunt"}
-    return {"status": "idle", "mode": "no-queued-job"}
