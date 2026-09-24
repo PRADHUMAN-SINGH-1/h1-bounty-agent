@@ -118,11 +118,20 @@ class Settings:
 
     blob_token: str = _raw("BLOB_READ_WRITE_TOKEN")
 
-    llm_provider: str = _llm_provider()
-    llm_base_url: str = _llm_base_url(llm_provider)
-    llm_model: str = _llm_model(llm_provider)
+    llm_provider: str = ""
+    llm_base_url: str = ""
+    llm_model: str = ""
     hf_token: str = _raw("HF_TOKEN")
     llm_api_key: str = _raw("LLM_API_KEY")
+
+    def __post_init__(self) -> None:
+        # Resolve provider-dependent LLM settings at instance creation so
+        # test/deployment environment overrides cannot leave stale module-time
+        # dataclass defaults behind.
+        provider = _llm_provider()
+        object.__setattr__(self, "llm_provider", provider)
+        object.__setattr__(self, "llm_base_url", _llm_base_url(provider))
+        object.__setattr__(self, "llm_model", _llm_model(provider))
 
     requests_per_second: float = max(_float("REQUESTS_PER_SECOND", 1.0), 0.1)
     user_agent: str = _raw("RESEARCH_USER_AGENT", "H1-Bounty-Agent/0.4")
