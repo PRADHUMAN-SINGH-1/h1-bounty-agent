@@ -59,7 +59,7 @@ def _maybe_auto_submit(settings,api,store,finding_id,handle,target,title,severit
     if not settings.enable_submission or not settings.hackerone_api_token: return {"status":"blocked","reason":"automatic submission gate is not fully enabled"}
     if settings.dry_run: return {"status":"blocked","reason":"DRY_RUN is enabled"}
     if severity not in {"high","critical"}: return {"status":"blocked","reason":"automatic submission requires high/critical severity"}
-    if confidence<0.90: return {"status":"blocked","reason":f"confidence {confidence:.2f} is below the 0.90 automatic-submission threshold"}
+    if confidence < 0.90: return {"status":"blocked","reason":f"confidence {confidence:.2f} is below the 0.90 automatic-submission threshold"}
     if not reproduction or len(evidence_json)<10: return {"status":"blocked","reason":"insufficient reproduction/evidence"}
     if metadata.get("missing_validation"): return {"status":"blocked","reason":"finding still requires validation"}
     ok,scoped_asset,reason=target_is_in_scope(target,scopes)
@@ -90,7 +90,15 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
     llm=LLMClient(settings); llm_available=llm.available()
     for index,asset in enumerate(selected_assets,1):
         target=_target_for_asset(asset) or asset.asset_identifier.strip(); result["asset_types"][asset.asset_type]=result["asset_types"].get(asset.asset_type,0)+1
-        if on_progress: on_progress({"program":handle,"target":target,"phase":"finding_evidence","asset_type":asset.asset_type,"planned_targets":len(selected_assets),"completed_targets":index-1})
+        if on_progress:
+            on_progress({
+                "program": handle,
+                "target": target,
+                "phase": "finding_evidence",
+                "asset_type": asset.asset_type,
+                "planned_targets": len(selected_assets),
+                "completed_targets": index - 1,
+            })
         existing=store.list_findings()
         if any(row.get("program_handle")==handle and row.get("target")==target and row.get("state") in {"needs_review","approved","submitted"} for row in existing): result["skipped"].append(f"Existing finding queue entry for {target}"); continue
         evidence=[]
@@ -102,9 +110,28 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
             current_surface=sorted({item.source for item in evidence if item.name=="attack_surface_endpoint" and item.source.startswith(("http://","https://"))}); snapshot=store.save_surface_snapshot(f"{handle}:{target}",current_surface); delta=compare_surfaces(snapshot["previous"],snapshot["current"])
             if delta.added: evidence.append(Evidence("surface_delta_added",f"New attack-surface items since last research: {', '.join(delta.added[:50])}",target))
         else:
-            analysis=analyze_asset(asset,settings); evidence=analysis.evidence
+            analysis = analyze_asset(asset, settings)
+            evidence = analysis.evidence
+            result["research_trace"] = result.get("research_trace", [])
+            result["research_trace"].append({
+                "target": target,
+                "asset_intelligence": f"asset_intelligence:{asset.asset_type.lower()}",
+                "status": analysis.status,
+                "detail": analysis.detail,
+                "evidence_count": len(evidence),
+            })
             if analysis.status in {"manual","skipped"}: result["skipped"].append(f"{target}: {analysis.detail}"); result["targets_checked"]+=1; continue
-        result["targets_checked"]+=1; result["evidence_collected"]+=len(evidence)
+        result["targets_checked"] += 1
+        result["evidence_collected"] += len(evidence)
+        result["research_trace"] = result.get("research_trace", [])
+        result["research_trace"].append({
+            "target": target,
+            "asset_type": asset.asset_type,
+            "checks_run": len(evidence),
+            "evidence_collected": len(evidence),
+            "deep": deep,
+            "active": active,
+        })
         relevant=[item for item in program_tool_evidence if not (item.name=="nuclei_match" and (urlparse(item.source).hostname or "").lower()!=(urlparse(target).hostname or "").lower())][:250]; evidence.extend(relevant); evidence_json=[item.__dict__ for item in evidence]
         if on_progress: on_progress({"program":handle,"target":target,"phase":"triaging_evidence","detail":f"Evaluating {len(evidence_json)} evidence items","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
         if not llm_available: result["skipped"].append(f"{target}: no hosted LLM configured"); continue
@@ -119,7 +146,8 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         try: confidence=float(draft.get("confidence") or 0)
         except (TypeError,ValueError): confidence=0
         if confidence<0.70: continue
-        weakness_id=_coerce_optional_int(draft.get("weakness_id")); metadata={"asset_type":asset.asset_type,"asset_identifier":asset.asset_identifier,"scope_reference":asset.reference or "","scope_max_severity":asset.max_severity or "","affected_component":draft.get("affected_component") or "","preconditions":draft.get("preconditions") or "","observed_behavior":draft.get("observed_behavior") or "","expected_behavior":draft.get("expected_behavior") or "","attack_scenario":draft.get("attack_scenario") or "","remediation":draft.get("remediation") or "","references":draft.get("references") or [],"weakness_name":draft.get("weakness_name") or "","weakness_id":weakness_id,"cvss_score":draft.get("cvss_score"),"cvss_vector":draft.get("cvss_vector") or "","missing_validation":draft.get("missing_validation") or []}
+        weakness_id = _coerce_optional_int(draft.get("weakness_id"))
+ metadata={"asset_type":asset.asset_type,"asset_identifier":asset.asset_identifier,"scope_reference":asset.reference or "","scope_max_severity":asset.max_severity or "","affected_component":draft.get("affected_component") or "","preconditions":draft.get("preconditions") or "","observed_behavior":draft.get("observed_behavior") or "","expected_behavior":draft.get("expected_behavior") or "","attack_scenario":draft.get("attack_scenario") or "","remediation":draft.get("remediation") or "","references":draft.get("references") or [],"weakness_name":draft.get("weakness_name") or "","weakness_id":weakness_id,"cvss_score":draft.get("cvss_score"),"cvss_vector":draft.get("cvss_vector") or "","missing_validation":draft.get("missing_validation") or []}
         finding_id=store.create_finding({"program_handle":handle,"target":target,"title":draft.get("title",""),"severity":draft.get("severity"),"state":"needs_review","summary":draft.get("summary",""),"impact":draft.get("impact",""),"reproduction":draft.get("reproduction",[]),"evidence":evidence_json,"structured_scope_id":asset.id,"weakness_id":weakness_id,"metadata":metadata}); result["created_findings"]+=1; result["findings"].append({"id":finding_id,"program":handle,"target":target,"title":draft.get("title",""),"severity":draft.get("severity"),"confidence":confidence})
         if settings.auto_submit_findings:
             try: result["findings"][-1]["auto_submission"]=_maybe_auto_submit(settings,api,store,finding_id,handle,target,draft.get("title",""),draft.get("severity"),confidence,draft.get("summary",""),draft.get("impact",""),draft.get("reproduction",[]),evidence_json,asset,scopes,metadata)
@@ -127,7 +155,7 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
     return result
 
 
-def run_cycle(settings,requested_programs=None,active=False,mode="",on_progress=None):
+def run_cycle(settings: Settings, requested_programs: set[str] | None = None, active: bool = False, mode: str = "", on_progress=None):
     summary={"status":"ok","mode":"discovery","checked_programs":0,"researched_targets":0,"created_findings":0,"skipped":[],"findings":[]}; store=Store(settings); api=None
     try:
         api=HackerOneClient(settings)
