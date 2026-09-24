@@ -10,6 +10,8 @@ on:
       - "render.yaml"
       - "api/index.py"
       - "src/h1_agent/config.py"
+      - "src/h1_agent/worker.py"
+      - "src/h1_agent/hackerone.py"
 
 concurrency:
   group: h1-autonomous-hunt
