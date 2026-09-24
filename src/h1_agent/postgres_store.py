@@ -227,14 +227,22 @@ class PostgresStore:
             ).fetchone()
             return int(row["id"])
 
+    @staticmethod
+    def _decode_json_value(value: Any, fallback: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            return fallback
+
     def _row(self, row: dict[str, Any]) -> dict[str, Any]:
         result = dict(row)
-        for key in ("reproduction", "evidence", "metadata"):
-            value = result.get(key)
-            if isinstance(value, str):
-                result[key] = json.loads(value)
-        if result.get("report_json") is not None and isinstance(result["report_json"], str):
-            result["report_json"] = json.loads(result["report_json"])
+        result["reproduction"] = self._decode_json_value(result.get("reproduction"), [])
+        result["evidence"] = self._decode_json_value(result.get("evidence"), [])
+        result["metadata"] = self._decode_json_value(result.get("metadata"), {})
+        if result.get("report_json") is not None:
+            result["report_json"] = self._decode_json_value(result.get("report_json"), None)
         for key in ("created_at", "approved_at", "submitted_at"):
             if result.get(key) is not None and not isinstance(result[key], str):
                 result[key] = result[key].isoformat()
