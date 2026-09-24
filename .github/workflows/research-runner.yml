@@ -76,7 +76,7 @@ jobs:
         run: |
           set -u
           job_id=$(cat /tmp/research-job-id)
-          for attempt in $(seq 1 36); do
+          for attempt in $(seq 1 120); do
             job=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/research/jobs/$job_id" 2>/tmp/job.err || true)
             echo "research job: $job"
 
@@ -88,7 +88,7 @@ jobs:
             findings=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
             if printf '%s' "$findings" | grep -q '"findings"'; then
               printf '%s\n' "$findings" > /tmp/findings.json
-              if python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("title") or "").strip() and f.get("evidence") for f in p.get("findings") or []); print("evidence-backed report candidate:", ok); raise SystemExit(0 if ok else 1)'; then
+              if python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"high","critical"} and str(f.get("title") or "").strip() and f.get("evidence") for f in p.get("findings") or []); print("high-or-critical evidence-backed candidate:", ok); raise SystemExit(0 if ok else 1)'; then
                 cat /tmp/findings.json
                 exit 0
               fi
@@ -96,7 +96,7 @@ jobs:
 
             status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status", "unknown"))' <<<"$job" 2>/dev/null || echo unknown)
             if [ "$status" = "completed" ]; then
-              echo "Research completed without an evidence-backed report candidate; the next scheduled run will try again."
+              echo "Research completed without a high/critical evidence-backed report candidate; the next scheduled run will try again."
               exit 1
             fi
             sleep 30
