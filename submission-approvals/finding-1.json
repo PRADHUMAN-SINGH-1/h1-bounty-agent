@@ -5,5 +5,6 @@
     "Send an unauthenticated HTTP GET request to https://assets.tumblr.com/languages/errors.js?_v=93508bcd7bd8fd96626968567f59d441.map and observe HTTP 200 with application/javascript; charset=utf-8.",
     "Send an unauthenticated HTTP GET request to https://assets.tumblr.com/client/prod/standalone/error-pages/index.build.js?_v=677b62afa0f9912c3740d551ba53508c.map and observe HTTP 200 with application/javascript; charset=utf-8.",
     "Review the returned bodies and confirm that the responses are JavaScript source-map files containing source content."
-  ]
+  ],
+  "attempt": 2
 }
