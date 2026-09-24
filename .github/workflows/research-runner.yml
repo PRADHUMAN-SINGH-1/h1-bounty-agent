@@ -1,7 +1,7 @@
 name: H1 Research Trigger
 # current autonomous hunt trigger
 # objective: find any evidence-backed, current, payable bounty (Low/Medium/High/Critical).
-# hunt kickoff: continue until a high/critical evidence-backed candidate is found or the run ends.
+# hunt kickoff: continue until any evidence-backed, bounty-eligible candidate is found or the run ends.
 
 on:
   schedule:
@@ -28,7 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: write
+      contents: read
+      statuses: write
     env:
       H1_AGENT_URL: ${{ secrets.H1_AGENT_URL || secrets.RENDER_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET || secrets.H1_CRON_SECRET }}
@@ -90,22 +91,22 @@ jobs:
             findings=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
             if printf '%s' "$findings" | grep -q '"findings"'; then
               printf '%s\n' "$findings" > /tmp/findings.json
-              if python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"high","critical"} and str(f.get("title") or "").strip() and f.get("evidence") for f in p.get("findings") or []); print("high-or-critical evidence-backed candidate:", ok); raise SystemExit(0 if ok else 1)'; then
+              if python -c 'import json; p=json.load(open("/tmp/findings.json")); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical","none"} and str(f.get("title") or "").strip() and f.get("evidence") and bool((f.get("metadata") or {}).get("asset_identifier")) for f in p.get("findings") or []); print("payable evidence-backed candidate:", ok); raise SystemExit(0 if ok else 1)'; then
                 cat /tmp/findings.json
-                printf '%s\n' "high_critical" > /tmp/hunt-result
+                printf '%s\n' "payable" > /tmp/hunt-result
                 exit 0
               fi
             fi
 
             status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status", "unknown"))' <<<"$job" 2>/dev/null || echo unknown)
             if [ "$status" = "completed" ]; then
-              echo "Research completed without a high/critical evidence-backed report candidate; the next scheduled run will try again."
+              echo "Research completed without an evidence-backed payable candidate; the next scheduled run will try again."
               printf '%s\n' "none" > /tmp/hunt-result
               exit 1
             fi
             sleep 30
           done
-          echo "Research verification window expired without a high/critical evidence-backed report candidate."
+          echo "Research verification window expired without an evidence-backed payable candidate."
           printf '%s\n' "timeout" > /tmp/hunt-result
           exit 1
 
@@ -122,19 +123,19 @@ jobs:
           case "$result" in
             high_critical)
               state="success"
-              description="Evidence-backed high/critical candidate found"
+              description="Evidence-backed payable candidate found"
               ;;
             none)
               state="failure"
-              description="No evidence-backed high/critical candidate in this run"
+              description="No evidence-backed payable candidate in this run"
               ;;
             timeout)
               state="error"
-              description="Hunt timed out without a high/critical candidate"
+              description="Hunt timed out without a payable candidate"
               ;;
             *)
               state="error"
               description="Hunt ended without a definitive result"
               ;;
           esac
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA"             -f state="$state"             -f context="H1 Critical Hunt"             -f description="$description"             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA"             -f state="$state"             -f context="H1 Paid Bounty Hunt"             -f description="$description"             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
