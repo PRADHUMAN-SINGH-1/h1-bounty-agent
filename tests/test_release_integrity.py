@@ -91,3 +91,17 @@ def test_llm_weakness_id_is_normalized_before_persistence():
     assert "def _coerce_optional_int" in worker
     assert 'weakness_id = _coerce_optional_int(draft.get("weakness_id"))' in worker
     assert '"weakness_id": weakness_id' in worker
+
+
+def test_llm_parser_accepts_trailing_model_text():
+    from h1_agent.llm import LLMClient
+    client = object.__new__(LLMClient)
+    client.generate = lambda prompt: '{"status":"candidate"}\n{"ignored":"second"}'
+    assert client.json("test") == {"status": "candidate"}
+
+
+def test_llm_parser_accepts_fenced_json():
+    from h1_agent.llm import LLMClient
+    client = object.__new__(LLMClient)
+    client.generate = lambda prompt: '```json\n{"status":"no_finding"}\n```'
+    assert client.json("test") == {"status": "no_finding"}
