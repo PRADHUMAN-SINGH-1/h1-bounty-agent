@@ -58,7 +58,7 @@ def _maybe_auto_submit(settings,api,store,finding_id,handle,target,title,severit
     if not settings.auto_submit_findings: return None
     if not settings.enable_submission or not settings.hackerone_api_token: return {"status":"blocked","reason":"automatic submission gate is not fully enabled"}
     if settings.dry_run: return {"status":"blocked","reason":"DRY_RUN is enabled"}
-    if severity not in {"high","critical"}: return {"status":"blocked","reason":"automatic submission requires high/critical severity"}
+    if severity not in {"high", "critical"}: return {"status":"blocked","reason":"automatic submission requires high/critical severity"}
     if confidence < 0.90: return {"status":"blocked","reason":f"confidence {confidence:.2f} is below the 0.90 automatic-submission threshold"}
     if not reproduction or len(evidence_json)<10: return {"status":"blocked","reason":"insufficient reproduction/evidence"}
     if metadata.get("missing_validation"): return {"status":"blocked","reason":"finding still requires validation"}
@@ -142,7 +142,9 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         if on_progress: on_progress({"program":handle,"target":target,"phase":"drafting_report","detail":"Building an evidence-grounded candidate report","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
         try: draft=llm.draft_finding(handle,target,evidence_json,leads=leads,program_context=program_context or {})
         except Exception as exc: result["skipped"].append(f"{target}: LLM analysis failed: {exc}"); continue
-        if draft.get("status")!="candidate": continue
+        if draft.get("status") != "candidate":
+            result["skipped"].append(f"{target}: LLM evaluation returned status={draft.get('status')!r}; no bounty candidate was created from the collected evidence.")
+            continue
         try: confidence=float(draft.get("confidence") or 0)
         except (TypeError,ValueError): confidence=0
         if confidence<0.70: continue
@@ -177,7 +179,9 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
     try:
         api=HackerOneClient(settings)
         if requested_programs:
-            requested_mode=(mode or ("active" if active else "passive")).strip().lower(); selected_deep=requested_mode in {"full","deep","deep-research"}; selected_active=requested_mode in {"active","assessment"}
+            requested_mode=(mode or ("active" if active else "passive")).strip().lower(); selected_deep = requested_mode in {"full","deep","deep-research"};
+            if selected_deep:
+                selected_deep = True; selected_active=requested_mode in {"active","assessment"}
             if selected_active and not settings.allow_active_tests: return {**summary,"status":"blocked","error_type":"authorization_gate","error":"Active vulnerability assessment is disabled."}
             summary["mode"]="selected-program-full-research" if selected_deep else "selected-program-passive-research"; per_program=[]
             for handle in sorted(requested_programs):
