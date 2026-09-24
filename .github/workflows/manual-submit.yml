@@ -1,0 +1,84 @@
+name: Human-Approved H1 Submission
+
+on:
+  push:
+    paths:
+      - "submission-approvals/*.json"
+  workflow_dispatch:
+
+concurrency:
+  group: h1-human-approved-submission
+  cancel-in-progress: false
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      H1_AGENT_URL: ${{ secrets.H1_AGENT_URL || secrets.RENDER_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET || secrets.H1_CRON_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate submission approval
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$H1_AGENT_URL"
+          test -n "$CRON_SECRET"
+          approval_file=$(find submission-approvals -maxdepth 1 -type f -name '*.json' -print | head -1 || true)
+          if [ -z "$approval_file" ]; then
+            echo "No pending human-approved submission."
+            exit 0
+          fi
+          python - <<'PY' "$approval_file"
+          import json, sys
+          p=json.load(open(sys.argv[1], encoding="utf-8"))
+          required=(
+              "I personally reproduced the issue, verified current scope/rules, "
+              "checked evidence and duplicates, and approve this report for HackerOne submission."
+          )
+          assert int(p["finding_id"]) > 0
+          assert p["confirmation"] == required
+          assert isinstance(p["reproduction"], list) and all(str(x).strip() for x in p["reproduction"])
+          PY
+          echo "$approval_file" > /tmp/approval-file
+
+      - name: Verify deployed release
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            version=$(curl --fail-with-body --silent --show-error --max-time 30               -H "Authorization: Bearer $CRON_SECRET"               "$H1_AGENT_URL/api/cron/version" 2>/tmp/version.err || true)
+            echo "deployed release: $version"
+            commit=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("commit", ""))' <<<"$version" 2>/dev/null || true)
+            if [ "$commit" = "$GITHUB_SHA" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "Render has not deployed $GITHUB_SHA."
+          exit 1
+
+      - name: Submit verified finding
+        shell: bash
+        run: |
+          set -euo pipefail
+          approval_file=$(cat /tmp/approval-file)
+          response=$(curl --fail-with-body --silent --show-error --max-time 60             -H "Authorization: Bearer $CRON_SECRET"             -H "Content-Type: application/json"             --data-binary "@$approval_file"             "$H1_AGENT_URL/api/cron/submit-verified-finding")
+          echo "$response"
+          status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status",""))' <<<"$response")
+          test "$status" = "submitted" -o "$status" = "already_submitted"
+          printf '%s\n' "$response" > /tmp/submission-response.json
+
+      - name: Remove one-shot approval
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          approval_file=$(cat /tmp/approval-file)
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/contents/$approval_file" --jq .sha)
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/contents/$approval_file"             -f message="chore: consume human-approved H1 submission"             -f sha="$sha"             -f branch="$GITHUB_REF_NAME"
