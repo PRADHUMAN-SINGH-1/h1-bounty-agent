@@ -239,7 +239,7 @@ def approve_finding(finding_id: int, request: Request, x_action_token: str | Non
     _require_session(request)
     _verify_action_token(x_action_token)
     from h1_agent.config import Settings
-    from h1_agent.hackerone import HackerOneClient
+    from h1_agent.hackerone import HackerOneAPIError, HackerOneClient
     from h1_agent.models import Evidence, Finding
     from h1_agent.scope import normalize_scopes, target_is_in_scope
     from h1_agent.store import Store
@@ -371,6 +371,12 @@ async def cron_submit_verified_finding(
                 weakness_id=finding.weakness_id,
                 structured_scope_id=(int(finding.structured_scope_id) if str(finding.structured_scope_id or "").isdigit() else None),
             )
+        except HackerOneAPIError as exc:
+            raise HTTPException(status_code=400, detail=f"HackerOne submission failed: {exc}") from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Submission preparation failed: {exc.__class__.__name__}: {exc}") from exc
         finally:
             api.close()
 
