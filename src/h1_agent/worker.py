@@ -198,20 +198,38 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
         payload={"data":[]}
         max_pages=12
         for catalog_page in range(1,max_pages+1):
-            page_payload=api.programs(page=catalog_page,page_size=25); page_data=page_payload.get("data",[]); payload["data"].extend(page_data)
+            page_payload=api._programs_page(page=catalog_page,page_size=100); page_data=page_payload.get("data",[]); payload["data"].extend(page_data)
             if on_progress: on_progress({"phase":"discovering_programs","detail":f"Scanned HackerOne program page {catalog_page}/{max_pages}","programs_seen":len(payload["data"]),"planned_targets":0,"completed_targets":0})
-            if len(page_data)<25: break
+            if len(page_data)<100: break
         ranked=[]
-        for index,item in enumerate(payload.get("data",[]),1):
+        metadata_candidates=[]
+        for item in payload.get("data",[]):
             attrs=item.get("attributes",{}); handle=attrs.get("handle")
-            if not handle or not attrs.get("offers_bounties",False): continue
-            try: scopes_payload=api.structured_scopes(handle); scopes=normalize_scopes(scopes_payload)
-            except Exception as exc: summary["skipped"].append({"program":handle,"reason":f"scope fetch failed: {exc}"}); continue
-            bounty_scopes=[s for s in scopes if s.eligible_for_bounty and s.eligible_for_submission]
-            if not bounty_scopes: continue
-            store.save_program({"data":{"attributes":attrs,"id":item.get("id"),"type":item.get("type","program")}}); store.save_scopes(handle,scopes_payload)
-            opportunity=rank(handle,attrs.get("name",handle),attrs.get("state",""),bounty_scopes,{"offers_bounties":True,"open_scope":attrs.get("open_scope",False),"fast_payments":attrs.get("fast_payments",False)}); ranked.append((opportunity,bounty_scopes))
-            if on_progress: on_progress({"phase":"ranking_programs","detail":f"Evaluated bounty scope for {handle}","programs_seen":len(payload["data"]),"bounty_programs":len(ranked),"planned_targets":0,"completed_targets":0})
+            if not handle or not attrs.get("offers_bounties",False):
+                continue
+            state=str(attrs.get("state") or "").lower()
+            cheap_score=(2 if state in {"public","active"} else 0)+(2 if attrs.get("open_scope",False) else 0)+(2 if attrs.get("fast_payments",False) else 0)
+            metadata_candidates.append((-cheap_score,handle,item))
+        metadata_candidates.sort(key=lambda row:(row[0],row[1]))
+
+        scope_probe_limit=max(10,settings.autonomous_max_programs*10)
+        for _,handle,item in metadata_candidates[:scope_probe_limit]:
+            attrs=item.get("attributes",{})
+            try:
+                scopes_payload=api.structured_scopes(handle)
+                scopes=normalize_scopes(scopes_payload)
+            except Exception as exc:
+                summary["skipped"].append({"program":handle,"reason":f"scope fetch failed: {exc}"})
+                continue
+            bounty_scopes=[x for x in scopes if x.eligible_for_bounty and x.eligible_for_submission]
+            if not bounty_scopes:
+                continue
+            store.save_program({"data":{"attributes":attrs,"id":item.get("id"),"type":item.get("type","program")}})
+            store.save_scopes(handle,scopes_payload)
+            opportunity=rank(handle,attrs.get("name",handle),attrs.get("state",""),bounty_scopes,{"offers_bounties":True,"open_scope":attrs.get("open_scope",False),"fast_payments":attrs.get("fast_payments",False)})
+            ranked.append((opportunity,bounty_scopes))
+            if on_progress:
+                on_progress({"phase":"ranking_programs","detail":f"Evaluated bounty scope for {handle}","programs_seen":len(payload["data"]),"bounty_programs":len(ranked),"scope_candidates":scope_probe_limit,"planned_targets":0,"completed_targets":0})
         ranked.sort(key=lambda pair:(-pair[0].score,pair[0].handle)); summary["checked_programs"]=len(ranked)
         if not settings.autonomous_research:
             summary["top_opportunities"]=[asdict(x[0])|{"triage_score":x[0].score} for x in ranked[:10]]; return summary
