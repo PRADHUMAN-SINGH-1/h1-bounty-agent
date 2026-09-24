@@ -102,34 +102,13 @@ jobs:
             findings=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
             if printf '%s' "$findings" | grep -q '"findings"'; then
               printf '%s\n' "$findings" > /tmp/findings.json
-              if python - <<'PY'
-          import json
-          before = set(open("/tmp/baseline-finding-ids", encoding="utf-8").read().split())
-          payload = json.load(open("/tmp/findings.json", encoding="utf-8"))
-          required = ("title", "summary", "impact", "reproduction", "evidence", "structured_scope_id")
-          meta_required = ("asset_identifier", "affected_component", "observed_behavior", "expected_behavior")
-          chosen = None
-          for f in payload.get("findings") or []:
-              m = f.get("metadata") or {}
-              valid = (
-                  str(f.get("id")) not in before
-                  and str(f.get("state")) in {"needs_review", "approved", "submitted"}
-                  and str(f.get("severity") or "").lower() in {"low", "medium", "high", "critical", "none"}
-                  and all(str(f.get(k) or "").strip() for k in required)
-                  and isinstance(f.get("reproduction"), list) and bool(f.get("reproduction"))
-                  and isinstance(f.get("evidence"), list) and bool(f.get("evidence"))
-                  and all(str(m.get(k) or "").strip() for k in meta_required)
-                  and not m.get("missing_validation")
-              )
-              if valid:
-                  chosen = f
-                  break
-          print("new payable report-ready candidate:", bool(chosen))
-          if chosen:
-              print(json.dumps(chosen))
-          raise SystemExit(0 if chosen else 1)
-          PY
-              then
+              candidate=$(python -c 'import json; b=set(open("/tmp/baseline-finding-ids",encoding="utf-8").read().split()); p=json.load(open("/tmp/findings.json",encoding="utf-8")); req=("title","summary","impact","reproduction","evidence","structured_scope_id"); mk=("asset_identifier","affected_component","observed_behavior","expected_behavior"); ok=False
+for f in p.get("findings") or []:
+ m=f.get("metadata") or {}
+ if str(f.get("id")) not in b and str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in req) and isinstance(f.get("reproduction"),list) and bool(f.get("reproduction")) and isinstance(f.get("evidence"),list) and bool(f.get("evidence")) and all(str(m.get(k) or "").strip() for k in mk) and not m.get("missing_validation"): ok=True; break
+print("yes" if ok else "no")')
+              echo "new payable report-ready candidate: $candidate"
+              if [ "$candidate" = "yes" ]; then
                 cat /tmp/findings.json
                 printf '%s\n' "payable" > /tmp/hunt-result
                 exit 0
