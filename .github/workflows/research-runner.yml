@@ -12,6 +12,7 @@ on:
       - "src/h1_agent/config.py"
       - "src/h1_agent/worker.py"
       - "src/h1_agent/hackerone.py"
+      - "src/h1_agent/llm.py"
 
 concurrency:
   group: h1-autonomous-hunt
