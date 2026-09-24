@@ -21,7 +21,7 @@ on:
 
 concurrency:
   group: h1-autonomous-hunt
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   trigger:
