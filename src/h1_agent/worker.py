@@ -74,7 +74,7 @@ def _maybe_auto_submit(settings,api,store,finding_id,handle,target,title,severit
 def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=False,on_progress=None,program_context=None):
     result={"program":handle,"targets_checked":0,"created_findings":0,"evidence_collected":0,"checks_run":0,"findings":[],"skipped":[],"asset_types":{},"status":"ok"}
     if on_progress: on_progress({"program":handle,"phase":"loading_scope","target":None,"planned_targets":0,"completed_targets":0})
-    scopes_payload=api.structured_scopes(handle); scopes=normalize_scopes(scopes_payload); store.save_scopes(handle,scopes_payload)
+    scopes_payload=api._structured_scopes_page(handle,1,100); scopes=normalize_scopes(scopes_payload); store.save_scopes(handle,scopes_payload)
     selected_assets=_select_research_assets(scopes,max_targets,exhaustive=deep and not active)
     if on_progress: on_progress({"program":handle,"phase":"scope_ready","target":None,"planned_targets":len(selected_assets),"completed_targets":0})
     program_tool_evidence=[]
@@ -212,7 +212,7 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
             metadata_candidates.append((-cheap_score,handle,item))
         metadata_candidates.sort(key=lambda row:(row[0],row[1]))
 
-        scope_probe_limit=max(10,settings.autonomous_max_programs*10)
+        scope_probe_limit=max(10, min(15, settings.autonomous_max_programs * 5))
         for _,handle,item in metadata_candidates[:scope_probe_limit]:
             attrs=item.get("attributes",{})
             try:
