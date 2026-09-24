@@ -56,7 +56,7 @@ jobs:
           set -euo pipefail
           response=""
           for attempt in $(seq 1 10); do
-            response=$(curl --fail-with-body --silent --show-error --max-time 6000 -H "Authorization: Bearer $CRON_SECRET" -H "X-H1-Sync: 1" "$H1_AGENT_URL/api/cron")
+            response=$(curl --fail-with-body --silent --show-error --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron")
             echo "$response"
             job_id=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); print(p.get("job_id") or p.get("id") or "")' <<<"$response" 2>/dev/null || true)
             if [ -n "$job_id" ]; then
