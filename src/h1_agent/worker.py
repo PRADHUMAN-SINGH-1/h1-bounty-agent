@@ -147,7 +147,24 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         except (TypeError,ValueError): confidence=0
         if confidence<0.70: continue
         weakness_id = _coerce_optional_int(draft.get("weakness_id"))
- metadata={"asset_type":asset.asset_type,"asset_identifier":asset.asset_identifier,"scope_reference":asset.reference or "","scope_max_severity":asset.max_severity or "","affected_component":draft.get("affected_component") or "","preconditions":draft.get("preconditions") or "","observed_behavior":draft.get("observed_behavior") or "","expected_behavior":draft.get("expected_behavior") or "","attack_scenario":draft.get("attack_scenario") or "","remediation":draft.get("remediation") or "","references":draft.get("references") or [],"weakness_name":draft.get("weakness_name") or "","weakness_id":weakness_id,"cvss_score":draft.get("cvss_score"),"cvss_vector":draft.get("cvss_vector") or "","missing_validation":draft.get("missing_validation") or []}
+        metadata = {
+            "asset_type": asset.asset_type,
+            "asset_identifier": asset.asset_identifier,
+            "scope_reference": asset.reference or "",
+            "scope_max_severity": asset.max_severity or "",
+            "affected_component": draft.get("affected_component") or "",
+            "preconditions": draft.get("preconditions") or "",
+            "observed_behavior": draft.get("observed_behavior") or "",
+            "expected_behavior": draft.get("expected_behavior") or "",
+            "attack_scenario": draft.get("attack_scenario") or "",
+            "remediation": draft.get("remediation") or "",
+            "references": draft.get("references") or [],
+            "weakness_name": draft.get("weakness_name") or "",
+            "weakness_id": weakness_id,
+            "cvss_score": draft.get("cvss_score"),
+            "cvss_vector": draft.get("cvss_vector") or "",
+            "missing_validation": draft.get("missing_validation") or [],
+        }
         finding_id=store.create_finding({"program_handle":handle,"target":target,"title":draft.get("title",""),"severity":draft.get("severity"),"state":"needs_review","summary":draft.get("summary",""),"impact":draft.get("impact",""),"reproduction":draft.get("reproduction",[]),"evidence":evidence_json,"structured_scope_id":asset.id,"weakness_id":weakness_id,"metadata":metadata}); result["created_findings"]+=1; result["findings"].append({"id":finding_id,"program":handle,"target":target,"title":draft.get("title",""),"severity":draft.get("severity"),"confidence":confidence})
         if settings.auto_submit_findings:
             try: result["findings"][-1]["auto_submission"]=_maybe_auto_submit(settings,api,store,finding_id,handle,target,draft.get("title",""),draft.get("severity"),confidence,draft.get("summary",""),draft.get("impact",""),draft.get("reproduction",[]),evidence_json,asset,scopes,metadata)
