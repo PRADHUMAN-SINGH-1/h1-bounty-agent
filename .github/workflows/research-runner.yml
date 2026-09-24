@@ -18,7 +18,7 @@ concurrency:
 jobs:
   trigger:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     permissions:
       contents: write
     env:
@@ -58,8 +58,7 @@ jobs:
             job_id=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); print(p.get("job_id") or p.get("id") or "")' <<<"$response" 2>/dev/null || true)
             if [ -n "$job_id" ]; then
               printf '%s' "$job_id" > /tmp/research-job-id
-              printf '%s
-' "$response" > /tmp/research-response.json
+              printf '%s\n' "$response" > /tmp/research-response.json
               exit 0
             fi
             sleep 30
