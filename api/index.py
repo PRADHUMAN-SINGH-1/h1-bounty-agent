@@ -153,7 +153,15 @@ def dashboard() -> FileResponse:
 
 @app.get("/healthz", include_in_schema=False)
 def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "commit": os.getenv("RENDER_GIT_COMMIT", "")}
+
+@app.get("/api/cron/version")
+def cron_version(authorization: str | None = Header(default=None)) -> dict[str, str]:
+    _verify_cron_secret(authorization)
+    return {
+        "commit": os.getenv("RENDER_GIT_COMMIT", ""),
+        "branch": os.getenv("RENDER_GIT_BRANCH", ""),
+    }
 
 
 @app.get("/api")
