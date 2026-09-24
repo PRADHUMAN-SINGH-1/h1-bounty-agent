@@ -1,5 +1,6 @@
 name: H1 Research Trigger
 # current autonomous hunt trigger
+# hunt kickoff: continue until a high/critical evidence-backed candidate is found or the run ends.
 
 on:
   schedule:
