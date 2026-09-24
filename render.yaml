@@ -61,9 +61,9 @@ services:
       - key: AUTONOMOUS_PASSIVE_RESEARCH
         value: "false"
       - key: AUTONOMOUS_MAX_PROGRAMS
-        value: "3"
+        value: "5"
       - key: AUTONOMOUS_MAX_TARGETS_PER_PROGRAM
-        value: "3"
+        value: "5"
       - key: FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM
         value: "50"
       - key: RESEARCH_TARGET_TIMEOUT_SECONDS
