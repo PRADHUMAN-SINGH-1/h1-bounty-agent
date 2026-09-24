@@ -268,6 +268,122 @@ def approve_finding(finding_id: int, request: Request, x_action_token: str | Non
         store.close()
 
 
+@app.post("/api/cron/submit-verified-finding")
+async def cron_submit_verified_finding(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    """
+    One-shot human-approved submission path for the CI runner.
+
+    This endpoint is intentionally separate from autonomous research. The caller
+    must authenticate with CRON_SECRET and provide an explicit human confirmation
+    plus the reproduction steps that were personally verified. Current program
+    bounty/scope and normal finding validation are re-checked immediately before
+    the HackerOne API submission.
+    """
+    _verify_cron_secret(authorization)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+    try:
+        finding_id = int(body.get("finding_id"))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="finding_id must be an integer.") from exc
+
+    confirmation = str(body.get("confirmation") or "").strip()
+    required_confirmation = (
+        "I personally reproduced the issue, verified current scope/rules, "
+        "checked evidence and duplicates, and approve this report for HackerOne submission."
+    )
+    if confirmation != required_confirmation:
+        raise HTTPException(status_code=400, detail="Explicit human submission confirmation is required.")
+
+    reproduction = body.get("reproduction")
+    if not isinstance(reproduction, list) or not all(str(step).strip() for step in reproduction):
+        raise HTTPException(status_code=400, detail="Verified reproduction steps are required.")
+
+    from h1_agent.config import Settings
+    from h1_agent.hackerone import HackerOneClient
+    from h1_agent.models import Evidence, Finding
+    from h1_agent.reporting import markdown_report
+    from h1_agent.scope import normalize_scopes, target_is_in_scope
+    from h1_agent.store import Store
+    from h1_agent.validation import validate_finding
+
+    settings = Settings()
+    if not settings.enable_submission:
+        raise HTTPException(status_code=403, detail="HackerOne submission is disabled.")
+
+    store = Store(settings)
+    try:
+        row = store.get_finding(finding_id)
+        if row.get("state") == "submitted":
+            return {"status": "already_submitted", "finding": row}
+        if row.get("state") not in {"draft", "needs_review", "approved"}:
+            raise HTTPException(status_code=400, detail=f"Finding state {row.get('state')!r} cannot be submitted.")
+
+        row["reproduction"] = [str(step).strip() for step in reproduction]
+        row["state"] = "approved"
+        finding = Finding(
+            program_handle=row["program_handle"],
+            target=row["target"],
+            title=row["title"],
+            severity=row.get("severity"),
+            state="approved",
+            summary=row["summary"],
+            impact=row["impact"],
+            reproduction=row["reproduction"],
+            evidence=[Evidence(**item) for item in row["evidence"]],
+            structured_scope_id=row.get("structured_scope_id"),
+            weakness_id=row.get("weakness_id"),
+            metadata=row.get("metadata") or {},
+        )
+        validation = validate_finding(finding)
+        if not validation.ok:
+            raise HTTPException(status_code=400, detail="Report completeness check failed: " + "; ".join(validation.blockers))
+
+        api = HackerOneClient(settings)
+        try:
+            program_payload = api.program(finding.program_handle)
+            attrs = program_payload.get("data", {}).get("attributes", {})
+            if not attrs.get("offers_bounties", False):
+                raise HTTPException(status_code=400, detail="Current program is not offering bounties.")
+
+            scopes = normalize_scopes(api.structured_scopes(finding.program_handle))
+            ok, asset, reason = target_is_in_scope(finding.target, scopes)
+            if not ok or asset is None:
+                raise HTTPException(status_code=400, detail=f"Current scope check failed: {reason}")
+            if not asset.eligible_for_bounty:
+                raise HTTPException(status_code=400, detail="Current asset is not bounty-eligible.")
+            if not asset.eligible_for_submission:
+                raise HTTPException(status_code=400, detail="Current asset is not eligible for submission.")
+
+            payload = api.create_report(
+                team_handle=finding.program_handle,
+                title=finding.title,
+                vulnerability_information=markdown_report(finding),
+                impact=finding.impact,
+                severity_rating=finding.severity or "none",
+                weakness_id=finding.weakness_id,
+                structured_scope_id=(int(finding.structured_scope_id) if str(finding.structured_scope_id or "").isdigit() else None),
+            )
+        finally:
+            api.close()
+
+        # Persist the exact human-verified reproduction and the submitted H1 response.
+        row["reproduction"] = finding.reproduction
+        store.set_state(finding_id, "approved")
+        store.mark_submitted(finding_id, payload)
+        return {"status": "submitted", "finding": store.get_finding(finding_id), "report": payload}
+    finally:
+        store.close()
+
+
 @app.post("/api/findings/{finding_id}/submit")
 def submit_finding(finding_id: int, request: Request, x_action_token: str | None = Header(default=None)) -> dict[str, Any]:
     _require_session(request)
