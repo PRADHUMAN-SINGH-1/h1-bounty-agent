@@ -229,11 +229,11 @@ class HackerOneClient:
         except HackerOneAPIError:
             raise
         except httpx.HTTPStatusError as exc:
-            raise HackerOneAPIError(
-                "report submission",
-                f"HackerOne returned HTTP {exc.response.status_code}.",
-                exc.response.status_code,
-            ) from exc
+            detail = exc.response.text.strip().replace("\n", " ")[:1000]
+            message = f"HackerOne returned HTTP {exc.response.status_code}."
+            if detail:
+                message += f" Response: {detail}"
+            raise HackerOneAPIError("report submission", message, exc.response.status_code) from exc
         except httpx.RequestError as exc:
             raise HackerOneAPIError(
                 "report submission",
