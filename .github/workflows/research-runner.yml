@@ -13,6 +13,8 @@ on:
       - "src/h1_agent/worker.py"
       - "src/h1_agent/hackerone.py"
       - "src/h1_agent/llm.py"
+      - "src/h1_agent/postgres_store.py"
+      - "src/h1_agent/store.py"
 
 concurrency:
   group: h1-autonomous-hunt
