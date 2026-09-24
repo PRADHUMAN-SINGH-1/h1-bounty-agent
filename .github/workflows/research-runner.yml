@@ -1,4 +1,5 @@
 name: H1 Research Trigger
+# current autonomous hunt trigger
 
 on:
   schedule:
