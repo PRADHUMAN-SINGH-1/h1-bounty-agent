@@ -63,7 +63,7 @@ services:
       - key: AUTONOMOUS_MAX_PROGRAMS
         value: "3"
       - key: AUTONOMOUS_MAX_TARGETS_PER_PROGRAM
-        value: "1"
+        value: "3"
       - key: FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM
         value: "50"
       - key: RESEARCH_TARGET_TIMEOUT_SECONDS
@@ -93,11 +93,11 @@ services:
       - key: TOOLCHAIN_MAX_TARGETS
         value: "20"
       - key: TOOLCHAIN_HTTPX_TIMEOUT_SECONDS
-        value: "60"
+        value: "30"
       - key: TOOLCHAIN_KATANA_TIMEOUT_SECONDS
-        value: "90"
+        value: "45"
       - key: TOOLCHAIN_NUCLEI_TIMEOUT_SECONDS
-        value: "90"
+        value: "45"
       - key: RESEARCH_PROGRAM_ALLOWLIST
         value: ""
 
