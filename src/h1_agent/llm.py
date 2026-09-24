@@ -117,11 +117,24 @@ class LLMClient:
         raise ValueError(f"Unsupported LLM_PROVIDER: {self.provider}")
 
     def json(self, prompt: str) -> dict:
-        text = self.generate(prompt)
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end == -1:
-            raise ValueError("Model did not return JSON")
-        return json.loads(text[start : end + 1])
+        """Parse the first complete JSON object from model output."""
+        text = self.generate(prompt).strip()
+        candidates = [text]
+        if "```" in text:
+            candidates.append(text.replace("```json", "").replace("```", "").strip())
+        decoder = json.JSONDecoder()
+        for candidate in candidates:
+            start = candidate.find("{")
+            while start >= 0:
+                try:
+                    value, _ = decoder.raw_decode(candidate[start:])
+                except json.JSONDecodeError:
+                    start = candidate.find("{", start + 1)
+                    continue
+                if isinstance(value, dict):
+                    return value
+                start = candidate.find("{", start + 1)
+        raise ValueError("Model did not return a valid JSON object")
 
     def triage_evidence(
         self,
