@@ -68,8 +68,14 @@ jobs:
         run: |
           set -euo pipefail
           approval_file=$(cat /tmp/approval-file)
-          response=$(curl --fail-with-body --silent --show-error --max-time 60             -H "Authorization: Bearer $CRON_SECRET"             -H "Content-Type: application/json"             --data-binary "@$approval_file"             "$H1_AGENT_URL/api/cron/submit-verified-finding")
+          set +e
+          response=$(curl --silent --show-error --max-time 60             -H "Authorization: Bearer $CRON_SECRET"             -H "Content-Type: application/json"             --data-binary "@$approval_file"             -w "\nHTTP_STATUS:%{http_code}"             "$H1_AGENT_URL/api/cron/submit-verified-finding")
+          curl_status=$?
+          set -e
           echo "$response"
+          if [ "$curl_status" -ne 0 ]; then
+            exit "$curl_status"
+          fi
           status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status",""))' <<<"$response")
           test "$status" = "submitted" -o "$status" = "already_submitted"
           printf '%s\n' "$response" > /tmp/submission-response.json
