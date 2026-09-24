@@ -469,7 +469,11 @@ def diagnostics(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/cron")
-def cron(background_tasks: BackgroundTasks, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def cron(
+    background_tasks: BackgroundTasks,
+    authorization: str | None = Header(default=None),
+    x_h1_sync: str | None = Header(default=None),
+) -> dict[str, Any]:
     _verify_cron_secret(authorization)
     from h1_agent.config import Settings
     from h1_agent.store import Store
@@ -481,10 +485,16 @@ def cron(background_tasks: BackgroundTasks, authorization: str | None = Header(d
             job_id = str(queued["id"])
             programs = [str(item) for item in queued.get("programs", [])]
             mode = str(queued.get("mode") or "full")
+            if x_h1_sync == "1":
+                _run_research_job_background(job_id, programs, mode)
+                return store.get_research_job(job_id)
             background_tasks.add_task(_run_research_job_background, job_id, programs, mode)
             return {"status": "accepted", "mode": "queued-job", "job_id": job_id}
         if settings.autonomous_research:
             job_id = store.create_research_job({"programs": [], "mode": "full", "source": "autonomous-cron"})
+            if x_h1_sync == "1":
+                _run_autonomous_research_background(job_id)
+                return store.get_research_job(job_id)
             background_tasks.add_task(_run_autonomous_research_background, job_id)
             return {"status": "accepted", "mode": "autonomous-hunt", "job_id": str(job_id)}
         return {"status": "idle", "mode": "no-queued-job"}
