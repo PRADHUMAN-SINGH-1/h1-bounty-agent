@@ -33,62 +33,20 @@ jobs:
           test -n "$H1_AGENT_URL"
           test -n "$CRON_SECRET"
 
-      - name: Repair autonomous program selection
+      - name: Verify deployed release
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import base64
-          import json
-          import os
-          import urllib.request
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          token = os.environ["GH_TOKEN"]
-          api = f"https://api.github.com/repos/{repo}/contents/src/h1_agent/worker.py?ref=main"
-          req = urllib.request.Request(api, headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"})
-          with urllib.request.urlopen(req, timeout=30) as response:
-              file_payload = json.load(response)
-          file_sha = file_payload["sha"]
-
-          content = base64.b64decode(file_payload["content"]).decode("utf-8")
-          updated = content.replace(
-              "if opportunity.handle not in allowlist:",
-              "if allowlist and opportunity.handle not in allowlist:",
-          ).replace(
-              "results = engine.run(target, active=True)",
-              "results = engine.run(target, active=settings.allow_active_tests)",
-          ).replace(
-              'summary["mode"] = "autonomous-authorized-active-research"',
-              'summary["mode"] = "autonomous-authorized-research"',
-          ).replace(
-              "        try:\n            payload = api.programs(page=1, page_size=25)\n",
-              "        try:\n            payload = {\"data\": []}\n            for catalog_page in range(1, 41):\n                page_payload = api.programs(page=catalog_page, page_size=25)\n                page_data = page_payload.get(\"data\", [])\n                payload[\"data\"].extend(page_data)\n                if len(page_data) < 25:\n                    break\n",
-          )
-
-          if updated == content:
-              print("Autonomous worker already repaired")
-              raise SystemExit(0)
-
-          body = json.dumps({
-              "message": "fix: exhaust HackerOne program catalog for autonomous discovery",
-              "content": base64.b64encode(updated.encode("utf-8")).decode("ascii"),
-              "sha": file_sha,
-              "branch": "main",
-          }).encode("utf-8")
-          put = urllib.request.Request(
-              f"https://api.github.com/repos/{repo}/contents/src/h1_agent/worker.py",
-              data=body,
-              method="PUT",
-              headers={
-                  "Authorization": f"Bearer {token}",
-                  "Accept": "application/vnd.github+json",
-                  "Content-Type": "application/json",
-              },
-          )
-          with urllib.request.urlopen(put, timeout=30) as response:
-              result = json.load(response)
-          print("Repaired worker commit:", result.get("commit", {}).get("sha"))
-          PY
+          for attempt in $(seq 1 60); do
+            version=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/version" 2>/tmp/version.err || true)
+            echo "deployed release: $version"
+            commit=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("commit", ""))' <<<"$version" 2>/dev/null || true)
+            if [ "$commit" = "$GITHUB_SHA" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Render has not deployed GITHUB_SHA=$GITHUB_SHA."
+          exit 1
 
       - name: Trigger Render bounty worker
         run: |
@@ -97,9 +55,11 @@ jobs:
           for attempt in $(seq 1 10); do
             response=$(curl --fail-with-body --silent --show-error --max-time 6000 -H "Authorization: Bearer $CRON_SECRET" -H "X-H1-Sync: 1" "$H1_AGENT_URL/api/cron")
             echo "$response"
-            job_id=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("job_id", ""))' <<<"$response")
+            job_id=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); print(p.get("job_id") or p.get("id") or "")' <<<"$response" 2>/dev/null || true)
             if [ -n "$job_id" ]; then
               printf '%s' "$job_id" > /tmp/research-job-id
+              printf '%s
+' "$response" > /tmp/research-response.json
               exit 0
             fi
             sleep 30
