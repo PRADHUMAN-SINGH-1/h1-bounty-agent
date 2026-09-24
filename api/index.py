@@ -308,7 +308,7 @@ async def cron_submit_verified_finding(
         raise HTTPException(status_code=400, detail="Verified reproduction steps are required.")
 
     from h1_agent.config import Settings
-    from h1_agent.hackerone import HackerOneClient
+    from h1_agent.hackerone import HackerOneAPIError, HackerOneClient
     from h1_agent.models import Evidence, Finding
     from h1_agent.reporting import markdown_report
     from h1_agent.scope import normalize_scopes, target_is_in_scope
@@ -359,8 +359,6 @@ async def cron_submit_verified_finding(
                 raise HTTPException(status_code=400, detail="Current asset is not bounty-eligible.")
             if not asset.eligible_for_submission:
                 raise HTTPException(status_code=400, detail="Current asset is not eligible for submission.")
-            if not asset.eligible_for_bounty:
-                raise HTTPException(status_code=400, detail="Current asset is not bounty-eligible.")
 
             payload = api.create_report(
                 team_handle=finding.program_handle,
