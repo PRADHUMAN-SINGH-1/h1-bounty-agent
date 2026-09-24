@@ -247,7 +247,10 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
             if on_progress: on_progress({"phase":"selecting_program","program":opportunity.handle,"detail":"Selected bounty-eligible program for autonomous research","planned_targets":settings.autonomous_max_targets_per_program,"completed_targets":0})
             result=_research_program(settings,api,store,opportunity.handle,settings.autonomous_max_targets_per_program,active=False,deep=True,on_progress=on_progress,program_context={"handle":opportunity.handle,"name":opportunity.name,"state":opportunity.state,"offers_bounties":opportunity.offers_bounties})
             summary["researched_targets"]+=result.get("targets_checked",0); summary["created_findings"]+=result.get("created_findings",0); summary["findings"].extend(result.get("findings",[])); summary["skipped"].extend([{"program":opportunity.handle,"reason":x} for x in result.get("skipped",[])])
-            if result.get("findings"): break
+            # Keep searching after low/medium findings; stop only when a high/critical
+            # candidate is produced so the autonomous hunt can surface stronger issues.
+            if any(str(item.get("severity") or "").lower() in {"high", "critical"} for item in result.get("findings", [])):
+                break
         summary["mode"]="autonomous-authorized-research"; return summary
     except Exception as exc: return {**summary,"status":"error","error":f"{exc.__class__.__name__}: {exc}","error_type":"worker"}
     finally:
