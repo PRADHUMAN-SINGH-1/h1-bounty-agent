@@ -73,12 +73,13 @@ jobs:
           curl_status=$?
           set -e
           echo "$response"
-          if [ "$curl_status" -ne 0 ]; then
-            exit "$curl_status"
-          fi
-          status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status",""))' <<<"$response")
+          if [ "$curl_status" -ne 0 ]; then exit "$curl_status"; fi
+          body=$(printf '%s\n' "$response" | sed '/^HTTP_STATUS:/d')
+          http_status=$(printf '%s\n' "$response" | sed -n 's/^HTTP_STATUS://p' | tail -1)
+          printf '%s\n' "$body" > /tmp/submission-response.json
+          test "$http_status" = "200" -o "$http_status" = "201"
+          status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status",""))' <<<"$body")
           test "$status" = "submitted" -o "$status" = "already_submitted"
-          printf '%s\n' "$response" > /tmp/submission-response.json
 
       - name: Remove one-shot approval
         if: success()
