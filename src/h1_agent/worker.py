@@ -136,6 +136,8 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         if on_progress: on_progress({"program":handle,"target":target,"phase":"triaging_evidence","detail":f"Evaluating {len(evidence_json)} evidence items","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
         if not llm_available: result["skipped"].append(f"{target}: no hosted LLM configured"); continue
         matched_patterns=relevant_patterns(evidence,limit=12)
+        if on_progress:
+            on_progress({"program": handle, "target": target, "phase": "triaging_evidence", "detail": f"Evaluating {len(evidence_json)} evidence items", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
         try:
             triage=llm.triage_evidence(handle,target,{**(program_context or {}),"matched_patterns":[{"name":p.name,"classes":p.classes,"prerequisites":p.prerequisites,"strong_signals":p.strong_signals,"false_positive_traps":p.false_positive_traps,"impact":p.impact} for p in matched_patterns]},evidence_json); leads=triage.get("leads") if isinstance(triage.get("leads"),list) else []; leads=leads[:8]
         except Exception as exc: leads=[]; result["skipped"].append(f"{target}: evidence triage failed: {exc}")
