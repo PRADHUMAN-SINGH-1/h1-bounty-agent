@@ -212,14 +212,18 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
         metadata_candidates=[]
         for item in payload.get("data",[]):
             attrs=item.get("attributes",{}); handle=attrs.get("handle")
-            if not handle or not attrs.get("offers_bounties",False):
+            if not handle:
                 continue
+            # Do not trust the program-level offers_bounties flag as a hard filter.
+            # Some programs can expose bounty-eligible structured scopes even when
+            # the catalog-level metadata is stale/incomplete. The structured scope
+            # is the source of truth for actual bounty eligibility.
             state=str(attrs.get("state") or "").lower()
-            cheap_score=(2 if state in {"public","active"} else 0)+(2 if attrs.get("open_scope",False) else 0)+(2 if attrs.get("fast_payments",False) else 0)
+            cheap_score=(2 if state in {"public","active"} else 0)+(2 if attrs.get("open_scope",False) else 0)+(2 if attrs.get("fast_payments",False) else 0)+(1 if attrs.get("offers_bounties",False) else 0)
             metadata_candidates.append((-cheap_score,handle,item))
         metadata_candidates.sort(key=lambda row:(row[0],row[1]))
 
-        scope_probe_limit=max(10, min(15, settings.autonomous_max_programs * 5))
+        scope_probe_limit=max(30, min(75, settings.autonomous_max_programs * 20))
         for _,handle,item in metadata_candidates[:scope_probe_limit]:
             attrs=item.get("attributes",{})
             try:
