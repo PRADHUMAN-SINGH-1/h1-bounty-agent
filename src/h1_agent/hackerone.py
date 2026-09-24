@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import time
 
 import httpx
 
@@ -22,6 +23,9 @@ class HackerOneClient:
         if base_url.endswith("/v1"):
             base_url = base_url[:-3].rstrip("/")
 
+        self._min_interval = 1.0 / max(float(settings.requests_per_second), 0.1)
+        self._last_request = 0.0
+        self._max_retries = 4
         self.client = httpx.Client(
             base_url=base_url + "/v1",
             auth=(settings.hackerone_username, settings.hackerone_api_token),
@@ -36,30 +40,54 @@ class HackerOneClient:
         self.client.close()
 
     def _get(self, path: str, operation: str, **params: Any) -> dict[str, Any]:
-        try:
-            response = self.client.get(path, params=params or None)
-            if response.status_code in {401, 403}:
+        for attempt in range(self._max_retries + 1):
+            elapsed = time.monotonic() - self._last_request
+            if elapsed < self._min_interval:
+                time.sleep(self._min_interval - elapsed)
+            try:
+                response = self.client.get(path, params=params or None)
+                self._last_request = time.monotonic()
+                if response.status_code == 429:
+                    if attempt >= self._max_retries:
+                        raise HackerOneAPIError(
+                            operation,
+                            "HackerOne rate limit exceeded after retries (HTTP 429).",
+                            429,
+                        )
+                    retry_after = response.headers.get("Retry-After", "")
+                    try:
+                        delay = max(float(retry_after), 0.0)
+                    except ValueError:
+                        delay = 0.0
+                    if delay <= 0:
+                        delay = min(8.0, 2.0 ** attempt)
+                    time.sleep(delay)
+                    continue
+                if response.status_code in {401, 403}:
+                    raise HackerOneAPIError(
+                        operation,
+                        f"HackerOne authentication/authorization failed (HTTP {response.status_code}). "
+                        "Verify HACKERONE_USERNAME is the API token identifier and HACKERONE_API_TOKEN is valid.",
+                        response.status_code,
+                    )
+                response.raise_for_status()
+                return response.json()
+            except HackerOneAPIError:
+                raise
+            except httpx.HTTPStatusError as exc:
                 raise HackerOneAPIError(
                     operation,
-                    f"HackerOne authentication/authorization failed (HTTP {response.status_code}). "
-                    "Verify HACKERONE_USERNAME is the API token identifier and HACKERONE_API_TOKEN is valid.",
-                    response.status_code,
-                )
-            response.raise_for_status()
-            return response.json()
-        except HackerOneAPIError:
-            raise
-        except httpx.HTTPStatusError as exc:
-            raise HackerOneAPIError(
-                operation,
-                f"HackerOne returned HTTP {exc.response.status_code}.",
-                exc.response.status_code,
-            ) from exc
-        except httpx.RequestError as exc:
-            raise HackerOneAPIError(
-                operation,
-                f"Could not reach HackerOne API: {exc.__class__.__name__}.",
-            ) from exc
+                    f"HackerOne returned HTTP {exc.response.status_code}.",
+                    exc.response.status_code,
+                ) from exc
+            except httpx.RequestError as exc:
+                if attempt >= self._max_retries:
+                    raise HackerOneAPIError(
+                        operation,
+                        f"Could not reach HackerOne API: {exc.__class__.__name__}.",
+                    ) from exc
+                time.sleep(min(8.0, 2.0 ** attempt))
+        raise HackerOneAPIError(operation, "HackerOne request failed after retries.")
 
     def _programs_page(self, page: int, page_size: int) -> dict[str, Any]:
         return self._get(
