@@ -41,6 +41,11 @@ def _csv(name: str) -> tuple[str, ...]:
 
 def _llm_provider() -> str:
     configured = _raw("LLM_PROVIDER", "")
+    # Vercel deployments must not silently point at a developer-local Ollama
+    # endpoint. An explicit Ollama selection is overridden by the hosted
+    # gateway; other explicit providers remain respected.
+    if os.getenv("VERCEL") and configured == "ollama":
+        return "vercel_gateway"
     if configured:
         return configured
     if os.getenv("HF_TOKEN"):
