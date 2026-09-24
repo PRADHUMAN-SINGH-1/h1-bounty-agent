@@ -65,7 +65,7 @@ def _llm_base_url(provider: str) -> str:
 
 def _llm_model(provider: str) -> str:
     if provider in {"vercel_gateway", "ai_gateway"}:
-        return _raw("LLM_MODEL", "inclusionai/ling-3.0-flash-vl-free")
+        return "inclusionai/ling-3.0-flash-vl-free"
     if provider == "huggingface":
         return _raw("LLM_MODEL", "Qwen/Qwen3-30B-A3B-Instruct-2507")
     return _raw("LLM_MODEL", "llama3.1:8b")
