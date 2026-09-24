@@ -142,6 +142,8 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
             triage=llm.triage_evidence(handle,target,{**(program_context or {}),"matched_patterns":[{"name":p.name,"classes":p.classes,"prerequisites":p.prerequisites,"strong_signals":p.strong_signals,"false_positive_traps":p.false_positive_traps,"impact":p.impact} for p in matched_patterns]},evidence_json); leads=triage.get("leads") if isinstance(triage.get("leads"),list) else []; leads=leads[:8]
         except Exception as exc: leads=[]; result["skipped"].append(f"{target}: evidence triage failed: {exc}")
         if on_progress: on_progress({"program":handle,"target":target,"phase":"drafting_report","detail":"Building an evidence-grounded candidate report","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
+        if on_progress:
+            on_progress({"program": handle, "target": target, "phase": "drafting_report", "detail": "Building an evidence-grounded candidate report", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
         try: draft=llm.draft_finding(handle,target,evidence_json,leads=leads,program_context=program_context or {})
         except Exception as exc: result["skipped"].append(f"{target}: LLM analysis failed: {exc}"); continue
         if draft.get("status") != "candidate":
