@@ -116,8 +116,8 @@ jobs:
                   and str(f.get("state")) in {"needs_review", "approved", "submitted"}
                   and str(f.get("severity") or "").lower() in {"low", "medium", "high", "critical", "none"}
                   and all(str(f.get(k) or "").strip() for k in required)
-                  and isinstance(f.get("reproduction"), list) and len(f.get("reproduction")) > 0
-                  and isinstance(f.get("evidence"), list) and len(f.get("evidence")) > 0
+                  and isinstance(f.get("reproduction"), list) and bool(f.get("reproduction"))
+                  and isinstance(f.get("evidence"), list) and bool(f.get("evidence"))
                   and all(str(m.get(k) or "").strip() for k in meta_required)
                   and not m.get("missing_validation")
               )
