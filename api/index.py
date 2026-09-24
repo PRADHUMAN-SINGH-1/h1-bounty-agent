@@ -351,9 +351,6 @@ async def cron_submit_verified_finding(
         try:
             program_payload = api.program(finding.program_handle)
             attrs = program_payload.get("data", {}).get("attributes", {})
-            if not attrs.get("offers_bounties", False):
-                raise HTTPException(status_code=400, detail="Current program is not offering bounties.")
-
             scopes = normalize_scopes(api.structured_scopes(finding.program_handle))
             ok, asset, reason = target_is_in_scope(finding.target, scopes)
             if not ok or asset is None:
@@ -362,6 +359,8 @@ async def cron_submit_verified_finding(
                 raise HTTPException(status_code=400, detail="Current asset is not bounty-eligible.")
             if not asset.eligible_for_submission:
                 raise HTTPException(status_code=400, detail="Current asset is not eligible for submission.")
+            if not asset.eligible_for_bounty:
+                raise HTTPException(status_code=400, detail="Current asset is not bounty-eligible.")
 
             payload = api.create_report(
                 team_handle=finding.program_handle,
