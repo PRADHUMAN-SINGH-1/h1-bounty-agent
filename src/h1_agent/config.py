@@ -57,7 +57,7 @@ def _llm_provider() -> str:
 
 def _llm_base_url(provider: str) -> str:
     if provider in {"vercel_gateway", "ai_gateway"}:
-        return _raw("LLM_BASE_URL", "https://ai-gateway.vercel.sh/v1")
+        return "https://ai-gateway.vercel.sh/v1"
     if provider == "huggingface":
         return _raw("LLM_BASE_URL", "https://router.huggingface.co/v1")
     return _raw("LLM_BASE_URL", "http://127.0.0.1:11434")
