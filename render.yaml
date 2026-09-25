@@ -63,11 +63,11 @@ services:
       - key: AUTONOMOUS_MAX_PROGRAMS
         value: "2"
       - key: AUTONOMOUS_MAX_TARGETS_PER_PROGRAM
-        value: "1"
+        value: "2"
       - key: FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM
         value: "50"
       - key: RESEARCH_TARGET_TIMEOUT_SECONDS
-        value: "180"
+        value: "90"
       - key: DEEP_MAX_SCRIPTS
         value: "10"
       - key: DEEP_MAX_QUERY_LINKS
@@ -87,7 +87,7 @@ services:
       - key: DEEP_MAX_PAGE_LINKS
         value: "30"
       - key: TOOLCHAIN_ENABLED
-        value: "true"
+        value: "false"
       - key: TOOLCHAIN_MAX_ROOTS
         value: "1"
       - key: TOOLCHAIN_MAX_TARGETS
