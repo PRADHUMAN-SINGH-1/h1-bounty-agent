@@ -28,8 +28,13 @@ jobs:
             f'https://dox.grammarly.com/documents/{doc}',
             f'https://dox.grammarly.com/documents/{doc}/proofread',
             f'https://dox.grammarly.com/documents/{doc}/ws',
+            f'https://dox.grammarly.com/documents/{doc}/content',
+            f'https://dox.grammarly.com/documents/{doc}/data',
+            f'https://dox.grammarly.com/document/{doc}',
+            f'https://dox.grammarly.com/document/{doc}/proofread',
             f'https://capi.grammarly.com/api/documents/{doc}',
             f'https://capi.grammarly.com/api/v1/documents/{doc}',
+            f'https://capi.grammarly.com/api/v1/document/{doc}',
             f'https://capi.grammarly.com/api/cheetah/v1/settings',
           ]
           out=[]
