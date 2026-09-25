@@ -1,6 +1,7 @@
 name: H1 Research Trigger
 # evidence-samples hunt rerun
 # immediate hunt trigger; scheduled retries remain every five minutes
+# research refresh: 2026-09-25
 
 on:
   schedule:
