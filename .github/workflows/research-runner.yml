@@ -1,5 +1,5 @@
 name: H1 Research Trigger
-# evidence-samples hunt
+# evidence-samples hunt rerun
 # immediate hunt trigger; scheduled retries remain every five minutes
 
 on:
