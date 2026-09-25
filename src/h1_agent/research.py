@@ -30,6 +30,20 @@ from .attack_surface import (
 from .config import Settings
 from .models import Evidence, ScopeAsset
 from .scope import require_in_scope, target_is_in_scope
+
+
+def same_origin(left: str, right: str) -> bool:
+    """Return True when two URLs share scheme, hostname, and effective port."""
+    a = urlparse(left)
+    b = urlparse(right)
+    if a.scheme.lower() != b.scheme.lower() or (a.hostname or "").lower() != (b.hostname or "").lower():
+        return False
+    def effective_port(parsed):
+        if parsed.port is not None:
+            return parsed.port
+        return 443 if parsed.scheme.lower() == "https" else 80 if parsed.scheme.lower() == "http" else None
+    return effective_port(a) == effective_port(b)
+
 from .vulnerability_checks import (
     api_spec_probe,
     cookie_probe,
