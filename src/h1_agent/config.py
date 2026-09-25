@@ -41,6 +41,11 @@ def _csv(name: str) -> tuple[str, ...]:
 
 def _llm_provider() -> str:
     configured = _raw("LLM_PROVIDER", "")
+    # Prefer a directly configured Gemini key over an exhausted routed provider.
+    # This keeps the production worker on an available first-party path when a
+    # Gemini credential is already present in the service environment.
+    if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
+        return "gemini"
     # Vercel deployments must not silently point at a developer-local Ollama
     # endpoint. An explicit Ollama selection is overridden by the hosted
     # gateway; other explicit providers remain respected.
