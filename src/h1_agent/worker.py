@@ -234,7 +234,6 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         })
         relevant=[item for item in program_tool_evidence if not (item.name=="nuclei_match" and (urlparse(item.source).hostname or "").lower()!=(urlparse(target).hostname or "").lower())][:250]; evidence.extend(relevant); evidence_json=[item.__dict__ for item in evidence]
         if on_progress: on_progress({"program":handle,"target":target,"phase":"triaging_evidence","detail":f"Evaluating {len(evidence_json)} evidence items","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
-        if not llm_available: result["skipped"].append(f"{target}: no hosted LLM configured"); continue
         # Hard duplicate-screening gate: query current HackerOne Hacktivity for this program
         # before any report drafting. If the duplicate source is unavailable, do not promote a lead.
         try:
@@ -258,7 +257,15 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         except Exception as exc:
             result["skipped"].append(f"{target}: duplicate screening failed: {exc.__class__.__name__}: {exc}")
             continue
-        matched_patterns=relevant_patterns(evidence,limit=12)
+        # Deterministic fallback for directly demonstrated, high-signal findings does not require an LLM.
+        fallback_draft = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
+        if fallback_draft is not None:
+            draft = fallback_draft
+        else:
+            if not llm_available:
+                result["skipped"].append(f"{target}: no hosted LLM configured and no deterministic evidence-backed candidate")
+                continue
+            matched_patterns=relevant_patterns(evidence,limit=12)
         if on_progress:
             on_progress({"program": handle, "target": target, "phase": "triaging_evidence", "detail": f"Evaluating {len(evidence_json)} evidence items", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
         try:
