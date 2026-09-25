@@ -18,6 +18,9 @@ jobs:
       H1_TOKEN: ${{ secrets.HACKERONE_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install hunt dependencies
+        run: python -m pip install httpx
+
       - name: Run bounded current-scope exposure hunt
         shell: bash
         run: |
