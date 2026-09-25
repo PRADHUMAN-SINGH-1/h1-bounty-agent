@@ -425,3 +425,17 @@ jobs:
           path: |
             docs-superhuman-results.json
             docs-superhuman-report.md
+
+  identity_oauth_safe_hunt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Superhuman identity OAuth safe hunt
+        run: python scripts/identity_oauth_safe_hunt.py
+      - name: Upload identity OAuth evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: identity-oauth-evidence
+          path: |
+            identity-oauth-probes.json
+            identity-oauth-report.md
