@@ -89,6 +89,55 @@ An external destination supplied by an unauthenticated caller should not be acce
           pathlib.Path('verified-report.md').write_text(report)
           PY
 
+      - name: Probe authorized Classic Docs CTF backends
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, re, subprocess
+          from pathlib import Path
+          doc='1198436185'
+          urls=[
+            f'https://dox.grammarly.com/documents/{doc}',
+            f'https://dox.grammarly.com/documents/{doc}/proofread',
+            f'https://dox.grammarly.com/documents/{doc}/content',
+            f'https://dox.grammarly.com/documents/{doc}/data',
+            f'https://capi.grammarly.com/api/documents/{doc}',
+            f'https://capi.grammarly.com/api/v1/documents/{doc}',
+            f'https://capi.grammarly.com/api/v1/document/{doc}',
+          ]
+          rows=[]
+          flag_re=re.compile(r'\\$FLAG\\s*[:=]\\s*[^<\\s]{4,500}|FLAG\\{[A-Za-z0-9_-]{4,500}\\}', re.I)
+          for u in urls:
+            p=subprocess.run(['curl','-sS','-L','--max-redirs','5','--connect-timeout','8','--max-time','15','-A','H1-Bounty-Agent/0.4','-D','/tmp/h','-o','/tmp/b',u],text=True,capture_output=True)
+            h=Path('/tmp/h').read_text(errors='replace') if Path('/tmp/h').exists() else ''
+            b=Path('/tmp/b').read_text(errors='replace') if Path('/tmp/b').exists() else ''
+            statuses=re.findall(r'^HTTP/[^ ]+\\s+(\\d+)',h,re.M)
+            status=statuses[-1] if statuses else ''
+            flags=sorted(set(flag_re.findall(b)))[:10]
+            rows.append({'url':u,'status':status,'length':len(b),'flag_hits':flags,'contains_doc_id':doc in b,'stderr':p.stderr[-300:]})
+            print(json.dumps(rows[-1],ensure_ascii=False))
+          Path('ctf-backend-results.json').write_text(json.dumps(rows,indent=2))
+          hit=next((x for x in rows if x['flag_hits']),None)
+          if hit:
+            Path('ctf-backend-report.md').write_text(
+              '# Verified Classic Docs CTF exposure\\n\\n'
+              '## Program\\nSuperhuman (formerly Grammarly)\\n\\n'
+              '## Affected endpoint\\n'+hit['url']+'\\n\\n'
+              '## Evidence\\n- HTTP status: '+hit['status']+'\\n- Response length: '+str(hit['length'])+' bytes\\n- Flag pattern: '+hit['flag_hits'][0]+'\\n'
+            )
+          else:
+            Path('ctf-backend-report.md').write_text('# NO VERIFIED CLASSIC DOCS CTF EXPOSURE\\n\\nNo tested backend returned a valid CTF flag pattern.\\n')
+          PY
+
+      - name: Upload Classic Docs CTF backend evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: classic-docs-ctf-backend-evidence
+          path: |
+            ctf-backend-results.json
+            ctf-backend-report.md
+
       - name: Upload proof and report
         uses: actions/upload-artifact@v4
         with:
