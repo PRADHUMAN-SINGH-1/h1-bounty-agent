@@ -53,6 +53,50 @@ jobs:
             print(json.dumps({k:v for k,v in row.items() if k!='body_prefix'},ensure_ascii=False))
           Path('ctf-runtime.json').write_text(json.dumps(out,indent=2))
           PY
+      - name: Test Classic Docs with normal client headers
+        shell: bash
+        run: |
+          set -u
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          doc='1198436185'
+          targets=[f'https://dox.grammarly.com/documents/{doc}',f'https://dox.grammarly.com/documents/{doc}/proofread']
+          profiles=[
+            {'name':'base','X-Client-Version':'14.1332.0','X-Client-Type':'browser','X-Container-Id':'h1-bounty-test'},
+            {'name':'chrome','X-Client-Version':'14.1332.0','X-Client-Type':'chrome','X-Container-Id':'h1-bounty-test'},
+            {'name':'extension','X-Client-Version':'14.1332.0','X-Client-Type':'extension','X-Container-Id':'h1-bounty-test'},
+          ]
+          rows=[]
+          for t in targets:
+            for prof in profiles:
+              args=['curl','-sS','-L','--max-redirs','5','--connect-timeout','6','--max-time','15','-A','Mozilla/5.0','-D','/tmp/h','-o','/tmp/b']
+              for k,v in prof.items():
+                if k!='name': args += ['-H',f'{k}: {v}']
+              args += [t]
+              p=subprocess.run(args,text=True,capture_output=True)
+              h=Path('/tmp/h').read_text(errors='replace') if Path('/tmp/h').exists() else ''
+              b=Path('/tmp/b').read_text(errors='replace') if Path('/tmp/b').exists() else ''
+              status=next((x for x in h.splitlines() if x.startswith('HTTP/')),'')
+              row={'target':t,'profile':prof['name'],'status':status,'length':len(b),'prefix':b[:250]}
+              rows.append(row)
+              print(json.dumps(row,ensure_ascii=False))
+          Path('ctf-header-results.json').write_text(json.dumps(rows,indent=2))
+          hit=next((x for x in rows if x['status'].startswith(('200','206')) and x['length']>0 and 'missing required headers' not in x['prefix'].lower()),None)
+          if hit:
+            Path('ctf-header-report.md').write_text('# Potential Classic Docs CTF backend response with client headers\n\nEndpoint: '+hit['target']+'\nProfile: '+hit['profile']+'\nStatus: '+hit['status']+'\nResponse length: '+str(hit['length'])+' bytes\n')
+          else:
+            Path('ctf-header-report.md').write_text('# NO ADDITIONAL CLASSIC DOCS CTF ACCESS\n\nThe tested normal client-header profiles did not produce an authenticated or flag-bearing Classic Docs response.\n')
+          PY
+
+      - name: Upload header test evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-header-evidence
+          path: |
+            ctf-header-results.json
+            ctf-header-report.md
+
       - name: Upload runtime evidence
         uses: actions/upload-artifact@v4
         with:
