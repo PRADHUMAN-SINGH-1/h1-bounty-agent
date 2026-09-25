@@ -1,5 +1,4 @@
 name: H1 Research Trigger
-# immediate hunt trigger
 
 on:
   schedule:
@@ -46,9 +45,7 @@ jobs:
             version=$(curl --fail-with-body --silent --show-error --max-time 15 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/version" 2>/tmp/version.err || true)
             echo "deployed release: $version"
             commit=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("commit", ""))' <<<"$version" 2>/dev/null || true)
-            if [ "$commit" = "$GITHUB_SHA" ]; then
-              exit 0
-            fi
+            if [ "$commit" = "$GITHUB_SHA" ]; then exit 0; fi
             sleep 5
           done
           echo "Render has not deployed $GITHUB_SHA."
@@ -82,17 +79,9 @@ jobs:
             job=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/research/jobs/$job_id" 2>/tmp/job.err || true)
             echo "research job: $job"
             findings=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
-            candidate=$(python -c 'import json,sys; b=set(open("/tmp/baseline-finding-ids",encoding="utf-8").read().split()); p=json.loads(sys.stdin.read()); ok=False
-for f in p.get("findings") or []:
- m=f.get("metadata") or {}
- if str(f.get("id")) in b: continue
- req=("title","summary","impact","reproduction","evidence","structured_scope_id")
- md=("asset_identifier","affected_component","preconditions","observed_behavior","expected_behavior","attack_scenario","remediation","cvss_score","cvss_vector","report_markdown")
- if str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in req) and isinstance(f.get("reproduction"),list) and f["reproduction"] and isinstance(f.get("evidence"),list) and f["evidence"] and all(str(m.get(k) or "").strip() for k in md) and m.get("weakness_id") is not None and not m.get("missing_validation"): ok=True; break
-print("yes" if ok else "no")' <<<"$findings" 2>/dev/null || echo no)
+            candidate=$(python -c 'import json,sys; b=set(open("/tmp/baseline-finding-ids",encoding="utf-8").read().split()); p=json.loads(sys.stdin.read()); print("yes" if any(str(f.get("id")) not in b and str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in ("title","summary","impact","reproduction","evidence","structured_scope_id")) and isinstance(f.get("reproduction"),list) and bool(f["reproduction"]) and isinstance(f.get("evidence"),list) and bool(f["evidence"]) and all(str((f.get("metadata") or {}).get(k) or "").strip() for k in ("asset_identifier","affected_component","preconditions","observed_behavior","expected_behavior","attack_scenario","remediation","cvss_score","cvss_vector","report_markdown")) and (f.get("metadata") or {}).get("weakness_id") is not None and not (f.get("metadata") or {}).get("missing_validation") for f in p.get("findings") or []) else "no")' <<<"$findings" 2>/dev/null || echo no)
             echo "full report candidate: $candidate"
             if [ "$candidate" = "yes" ]; then
-              cp /tmp/findings.json /tmp/final-findings.json 2>/dev/null || true
               exit 0
             fi
             status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status","unknown"))' <<<"$job" 2>/dev/null || echo unknown)
