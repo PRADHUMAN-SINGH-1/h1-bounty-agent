@@ -182,6 +182,16 @@ class HackerOneClient:
                 break
         return {"data": data, "meta": {"count": len(data)}}
 
+    def hacktivity(self, team_handle: str, page_size: int = 50) -> dict[str, Any]:
+        """Return recent disclosed Hacktivity for a program for duplicate screening."""
+        return self._get(
+            "/hackers/hacktivity",
+            "hacktivity duplicate screening",
+            queryString=f"team:{team_handle}",
+            sort="-disclosed_at",
+            **{"page[number]": 1, "page[size]": min(max(page_size, 1), 100)},
+        )
+
     def reports(self, page: int = 1, page_size: int = 100) -> dict[str, Any]:
         return self._get(
             "/hackers/me/reports",
