@@ -1,0 +1,81 @@
+name: Superhuman API Surface Evidence Hunt
+
+on:
+  push:
+    paths:
+      - ".github/workflows/superhuman-surface-evidence.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe known in-scope public API surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, re, subprocess
+          from pathlib import Path
+          targets=[
+            "https://gateway.grammarly.com/experimentation",
+            "https://gateway.grammarly.com/vito",
+            "https://gateway.grammarly.com/mise/api/v1",
+            "https://gateway.grammarly.com/authorship/v1/",
+            "https://properties.grammarly.com/",
+            "https://treatment.grammarly.com/",
+            "https://config.extension.grammarly.com/dynamicConfig.json",
+            "https://config.extension.grammarly.com/browserplugin/config.json",
+            "https://rwsgfy.grammarly.com/",
+            "https://subscription.grammarly.com/",
+            "https://app.grammarly.com/.git/HEAD",
+            "https://www.grammarly.com/.git/HEAD",
+            "https://coda.grammarly.com/.git/HEAD",
+            "https://superhuman.com/.git/HEAD",
+            "https://docs.superhuman.com/.git/HEAD",
+            "https://app.grammarly.com/.env",
+            "https://www.grammarly.com/.env",
+            "https://coda.grammarly.com/.env",
+            "https://superhuman.com/.env",
+            "https://docs.superhuman.com/.env",
+          ]
+          token_rx=re.compile(r'AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk_(?:live|test)_[A-Za-z0-9]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',re.I)
+          rows=[]; findings=[]
+          for u in targets:
+            p=subprocess.run(["curl","-sS","--max-redirs","0","--connect-timeout","6","--max-time","12","-A","H1-Bounty-Agent/0.4","-D","/tmp/h","-o","/tmp/b",u],text=True,capture_output=True)
+            h=Path("/tmp/h").read_text(errors="replace") if Path("/tmp/h").exists() else ""
+            b=Path("/tmp/b").read_text(errors="replace") if Path("/tmp/b").exists() else ""
+            status=next((x for x in h.splitlines() if x.startswith("HTTP/")),"")
+            ct=next((x.split(":",1)[1].strip() for x in h.splitlines() if x.lower().startswith("content-type:")),"")
+            matches=sorted(set(token_rx.findall(b)))
+            row={"url":u,"status":status,"content_type":ct,"length":len(b),
+                 "credential_patterns":[m[:8]+"…REDACTED" for m in matches[:10]]}
+            rows.append(row)
+            print(json.dumps(row,ensure_ascii=False))
+            if matches and (" 200 " in status or " 206 " in status):
+              findings.append({"url":u,"status":status,"content_type":ct,"length":len(b),
+                               "credential_patterns":row["credential_patterns"]})
+          Path("surface-results.json").write_text(json.dumps(rows,indent=2))
+          if findings:
+            f=findings[0]
+            Path("surface-report.md").write_text(
+              "# Potential public credential exposure\n\n"
+              "## Endpoint\n"+f["url"]+"\n\n"
+              "## Evidence\n- HTTP: "+f["status"]+"\n- Content-Type: "+f["content_type"]+"\n- Response length: "+str(f["length"])+" bytes\n- Detected pattern: "+", ".join(f["credential_patterns"])+"\n\n"
+              "The credential material itself was not stored in the artifact. Manual validation is required before submission.\n"
+            )
+          else:
+            Path("surface-report.md").write_text("# NO VERIFIED PUBLIC CREDENTIAL EXPOSURE\n\nNo tested public endpoint returned a recognized credential pattern in a 2xx response.\n")
+          PY
+      - name: Upload surface evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: superhuman-api-surface-evidence
+          path: |
+            surface-results.json
+            surface-report.md
