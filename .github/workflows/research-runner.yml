@@ -1,9 +1,9 @@
 name: H1 Research Trigger
-# prioritize immediate hunt; scheduled retries are spaced to avoid overlap
+# immediate hunt trigger; scheduled retries remain every five minutes
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
   push:
     paths:
