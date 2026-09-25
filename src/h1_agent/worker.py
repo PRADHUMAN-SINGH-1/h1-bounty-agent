@@ -225,6 +225,13 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         if not validation.ok:
             result["skipped"].append(f"{target}: report completeness gate failed: {'; '.join(validation.blockers)}")
             continue
+        # Materialize the exact complete Markdown report before storing the candidate.
+        report_markdown = markdown_report(candidate)
+        if "Review required" in report_markdown or "REVIEW REQUIRED" in report_markdown:
+            result["skipped"].append(f"{target}: generated report still contains placeholders")
+            continue
+        metadata["report_markdown"] = report_markdown
+        candidate.metadata = metadata
         finding_id=store.create_finding({"program_handle":handle,"target":target,"title":candidate.title,"severity":candidate.severity,"state":"needs_review","summary":candidate.summary,"impact":candidate.impact,"reproduction":candidate.reproduction,"evidence":evidence_json,"structured_scope_id":asset.id,"weakness_id":weakness_id,"metadata":metadata})
         result["created_findings"]+=1
         result["findings"].append({"id":finding_id,"program":handle,"target":target,"title":candidate.title,"severity":candidate.severity,"confidence":confidence})
