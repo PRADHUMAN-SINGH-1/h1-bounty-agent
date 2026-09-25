@@ -169,3 +169,64 @@ jobs:
         with:
           name: ctf-endpoint-evidence
           path: ctf-endpoints.json
+
+      - name: Wildcard high-signal exposure sweep
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -u
+          python - <<'PY'
+          import json, re, subprocess, urllib.parse
+          from pathlib import Path
+          seed='https://www.grammarly.com'
+          p=subprocess.run(['curl','-sS','--connect-timeout','8','--max-time','20','https://crt.sh/?q=%25.grammarly.com&output=json'],text=True,capture_output=True)
+          hosts=set(['www.grammarly.com','coda.grammarly.com','app.grammarly.com','gateway.superhuman.com','id.superhuman.com','settings.superhuman.com','superhuman.com'])
+          try:
+              for row in json.loads(p.stdout):
+                  for name in row.get('name_value','').splitlines():
+                      name=name.strip().lstrip('*.').lower()
+                      if name.endswith('.grammarly.com') and '*' not in name and len(name)<80:
+                          hosts.add(name)
+          except Exception: pass
+          paths=['/.env','/.env.production','/.git/HEAD','/actuator/env','/actuator/configprops','/swagger.json','/openapi.json','/api-docs']
+          secret_rx=re.compile(r'(AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk_(?:live|test)_[A-Za-z0-9]{20,})')
+          findings=[]
+          for host in sorted(hosts)[:80]:
+              for path in paths:
+                  url='https://'+host+path
+                  q=subprocess.run(['curl','-sS','--max-redirs','0','--connect-timeout','3','--max-time','6','-D','/tmp/wh','-o','/tmp/wb',url],text=True,capture_output=True)
+                  h=Path('/tmp/wh').read_text(errors='replace') if Path('/tmp/wh').exists() else ''
+                  b=Path('/tmp/wb').read_text(errors='replace') if Path('/tmp/wb').exists() else ''
+                  st=next((z for z in h.splitlines() if z.startswith('HTTP/')), '')
+                  if st and (' 200 ' in st or ' 206 ' in st) and b:
+                      matches=sorted(set(m.group(0) for m in secret_rx.finditer(b)))
+                      strong = bool(matches)
+                      if strong:
+                          redacted=[m[:8]+'…REDACTED' for m in matches]
+                          item={'url':url,'status':st,'length':len(b),'secret_patterns':redacted,'content_type':next((z.split(':',1)[1].strip() for z in h.splitlines() if z.lower().startswith('content-type:')), '')}
+                          findings.append(item)
+                          print(json.dumps(item))
+                          break
+          Path('wildcard-exposure.json').write_text(json.dumps(findings,indent=2))
+          report=Path('wildcard-exposure-report.md')
+          if findings:
+              x=findings[0]
+              report.write_text(
+                  '# Verified credential-like material exposure\n\n'
+                  + '## Target\n'+x['url']+'\n\n'
+                  + '## Observed behavior\nThe public in-scope endpoint returned an HTTP 2xx response containing a credential-like secret pattern. The captured report intentionally redacts the secret value.\n\n'
+                  + '## Evidence\n- HTTP status: '+x['status']+'\n- Response length: '+str(x['length'])+' bytes\n- Secret pattern class: '+', '.join(x['secret_patterns'])+'\n'
+              )
+          else:
+              report.write_text('# NO VERIFIED HIGH-SIGNAL EXPOSURE\n\nNo credential-like secret pattern was observed in the tested public endpoints.\n')
+          PY
+
+      - name: Upload wildcard exposure evidence
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wildcard-exposure-evidence
+          path: |
+            wildcard-exposure.json
+            wildcard-exposure-report.md
