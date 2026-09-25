@@ -1,0 +1,58 @@
+name: Classic Doc Deep Probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/classic-doc-deep-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch complete classic CTF document response
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          curl -sS -L --max-redirs 5 --connect-timeout 8 --max-time 30 -A 'Mozilla/5.0' -D evidence/headers.txt -o evidence/body.html 'https://app.grammarly.com/ddocs/1198436185'
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          body=Path('evidence/body.html').read_text(errors='replace')
+          headers=Path('evidence/headers.txt').read_text(errors='replace')
+          patterns={
+            'ctf_email':r'h1_ctf@grammarly\.com',
+            'ctf_user_id':r'1411519194',
+            'ctf_doc_id':r'1198436185',
+            'flag':r'\$FLAG\s*[:=]\s*[^<\s]{4,500}|FLAG\{[^}]{4,500}\}',
+            'classic_doc':r'/ddocs/\d+',
+            'dox_api':r'https://dox\.grammarly\.com[^\"\']+',
+            'capi_api':r'https://capi\.grammarly\.com[^\"\']+',
+            'graphql':r'https://[^\"\']*graphql[^\"\']*',
+            'api_path':r'[/][A-Za-z0-9_.-]{1,60}[/][A-Za-z0-9_./?&=%:-]{2,180}',
+          }
+          out={'headers':headers[:20000],'body_length':len(body)}
+          for name,pat in patterns.items():
+            hits=sorted(set(re.findall(pat,body,re.I)))
+            out[name]=hits[:100]
+          # Extract nearby context for challenge identifiers, but do not store long arbitrary text.
+          contexts=[]
+          for needle in ('1198436185','h1_ctf@grammarly.com','$FLAG','1411519194'):
+            for m in re.finditer(re.escape(needle),body,re.I):
+              a=max(0,m.start()-500); b=min(len(body),m.end()+1200)
+              contexts.append({'needle':needle,'context':re.sub(r'\s+',' ',body[a:b])[:1800]})
+          out['contexts']=contexts[:20]
+          Path('evidence/analysis.json').write_text(json.dumps(out,indent=2,ensure_ascii=False))
+          print(json.dumps(out,indent=2,ensure_ascii=False)[:30000])
+          PY
+      - name: Upload deep evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: classic-doc-deep-evidence
+          path: evidence
