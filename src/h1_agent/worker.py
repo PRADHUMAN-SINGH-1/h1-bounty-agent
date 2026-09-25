@@ -148,6 +148,29 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         relevant=[item for item in program_tool_evidence if not (item.name=="nuclei_match" and (urlparse(item.source).hostname or "").lower()!=(urlparse(target).hostname or "").lower())][:250]; evidence.extend(relevant); evidence_json=[item.__dict__ for item in evidence]
         if on_progress: on_progress({"program":handle,"target":target,"phase":"triaging_evidence","detail":f"Evaluating {len(evidence_json)} evidence items","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
         if not llm_available: result["skipped"].append(f"{target}: no hosted LLM configured"); continue
+        # Hard duplicate-screening gate: query current HackerOne Hacktivity for this program
+        # before any report drafting. If the duplicate source is unavailable, do not promote a lead.
+        try:
+            hacktivity_payload = api.hacktivity(handle, page_size=50)
+            disclosed_reports = []
+            for item in hacktivity_payload.get("data") or []:
+                attrs = item.get("attributes") or {}
+                rel_program = ((item.get("relationships") or {}).get("program") or {}).get("data") or {}
+                rel_attrs = rel_program.get("attributes") or {}
+                if rel_attrs.get("handle") and rel_attrs.get("handle") != handle:
+                    continue
+                disclosed_reports.append({
+                    "id": item.get("id"),
+                    "title": attrs.get("title") or "",
+                    "cwe": attrs.get("cwe") or "",
+                    "severity": attrs.get("severity_rating") or "",
+                    "disclosed_at": attrs.get("disclosed_at") or "",
+                    "url": attrs.get("url") or "",
+                })
+            program_context = {**(program_context or {}), "duplicate_screening": {"status": "checked", "source": "HackerOne Hacktivity", "disclosed_reports": disclosed_reports[:50]}}
+        except Exception as exc:
+            result["skipped"].append(f"{target}: duplicate screening failed: {exc.__class__.__name__}: {exc}")
+            continue
         matched_patterns=relevant_patterns(evidence,limit=12)
         if on_progress:
             on_progress({"program": handle, "target": target, "phase": "triaging_evidence", "detail": f"Evaluating {len(evidence_json)} evidence items", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
