@@ -1,0 +1,129 @@
+name: Superhuman Dangling DNS Hunt
+
+on:
+  push:
+    paths:
+      - ".github/workflows/superhuman-dangling-dns-hunt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dns:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Enumerate in-scope subdomains and test dangling DNS safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, re, subprocess
+          from pathlib import Path
+
+          roots = [
+              "grammarly.com",
+              "grammarly.io",
+              "grammarlyaws.com",
+              "superhuman.com",
+              "coda.io",
+          ]
+
+          provider_signatures = [
+              ("heroku", re.compile(r"no such app|herokucdn\.com/error-pages/no-such-app", re.I)),
+              ("github-pages", re.compile(r"there isn't a github pages site here|github pages", re.I)),
+              ("s3", re.compile(r"<Code>\s*NoSuchBucket\s*</Code>|NoSuchBucket", re.I)),
+              ("vercel", re.compile(r"DEPLOYMENT_NOT_FOUND|deployment not found|project not found", re.I)),
+              ("azure", re.compile(r"web app.*not found|404.*web app", re.I)),
+              ("fastly", re.compile(r"unknown domain|fastly error", re.I)),
+          ]
+
+          hosts = set()
+          for root in roots:
+              p = subprocess.run(
+                  ["curl", "-sS", "--connect-timeout", "8", "--max-time", "20",
+                   f"https://crt.sh/?q=%25.{root}&output=json"],
+                  text=True, capture_output=True
+              )
+              try:
+                  for row in json.loads(p.stdout or "[]"):
+                      for name in str(row.get("name_value", "")).splitlines():
+                          name = name.strip().lower().lstrip("*.")
+                          if not name or "*" in name:
+                              continue
+                          if name == root or name.endswith("." + root):
+                              hosts.add(name)
+              except Exception:
+                  pass
+
+          hosts.update({
+              "www.grammarly.com", "app.grammarly.com", "gateway.grammarly.com",
+              "gateway.superhuman.com", "id.superhuman.com", "settings.superhuman.com",
+              "coda.grammarly.com", "docs.superhuman.com", "superhuman.com"
+          })
+
+          rows = []
+          for host in sorted(hosts)[:300]:
+              d = subprocess.run(
+                  ["dig", "+short", "CNAME", host],
+                  text=True, capture_output=True
+              )
+              cnames = [x.strip().rstrip(".") for x in d.stdout.splitlines() if x.strip()]
+
+              if not cnames:
+                  continue
+
+              cname = cnames[0]
+              # Skip obvious first-party aliases; focus on delegated/external SaaS targets.
+              if cname == host or cname.endswith((".grammarly.com", ".grammarly.io", ".grammarlyaws.com", ".superhuman.com", ".coda.io")):
+                  continue
+
+              p = subprocess.run(
+                  ["curl", "-sS", "--max-redirs", "0", "--connect-timeout", "5", "--max-time", "10",
+                   "-A", "H1-Bounty-Agent/0.4", "-D", "/tmp/h", "-o", "/tmp/b", "https://" + host],
+                  text=True, capture_output=True
+              )
+              headers = Path("/tmp/h").read_text(errors="replace") if Path("/tmp/h").exists() else ""
+              body = Path("/tmp/b").read_text(errors="replace") if Path("/tmp/b").exists() else ""
+              status = next((x for x in headers.splitlines() if x.startswith("HTTP/")), "")
+              matches = [name for name, rx in provider_signatures if rx.search(body)]
+              if matches:
+                  rows.append({
+                      "host": host,
+                      "cname": cname,
+                      "status": status,
+                      "providers": matches,
+                      "body_length": len(body),
+                  })
+                  print(json.dumps(rows[-1], ensure_ascii=False))
+
+          Path("dangling-dns-results.json").write_text(json.dumps(rows, indent=2))
+          if rows:
+              x = rows[0]
+              Path("dangling-dns-report.md").write_text(
+                  "# Potential dangling DNS / subdomain takeover\n\n"
+                  "## Program\nSuperhuman (formerly Grammarly)\n\n"
+                  "## Affected hostname\n" + x["host"] + "\n\n"
+                  "## DNS evidence\nCNAME: " + x["cname"] + "\n\n"
+                  "## HTTP evidence\nStatus: " + x["status"] + "\n"
+                  "Provider signature: " + ", ".join(x["providers"]) + "\n"
+                  "Response length: " + str(x["body_length"]) + " bytes\n\n"
+                  "## Safety note\nNo account was claimed, no DNS record was modified, and no state-changing request was sent. "
+                  "This is a validation candidate only and requires manual confirmation that the provider resource is actually unclaimed "
+                  "and that the hostname remains in current program scope before submission.\n"
+              )
+          else:
+              Path("dangling-dns-report.md").write_text(
+                  "# NO VERIFIED DANGLING DNS FINDING\n\n"
+                  "No in-scope hostname produced a provider-specific unclaimed-resource signature during this read-only sweep.\n"
+              )
+          PY
+
+      - name: Upload DNS evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: superhuman-dangling-dns-evidence
+          path: |
+            dangling-dns-results.json
+            dangling-dns-report.md
