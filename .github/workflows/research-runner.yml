@@ -1,8 +1,4 @@
 name: H1 Research Trigger
-# current autonomous hunt trigger
-# objective: find any evidence-backed, current, payable bounty (Low/Medium/High/Critical).
-# hunt kickoff: continue until any evidence-backed, bounty-eligible candidate is found or the run ends.
-# manual kickoff: push-triggered hunt requested 2026-09-25.
 
 on:
   schedule:
@@ -34,10 +30,9 @@ jobs:
     env:
       H1_AGENT_URL: ${{ secrets.H1_AGENT_URL || secrets.RENDER_URL }}
       CRON_SECRET: ${{ secrets.CRON_SECRET || secrets.H1_CRON_SECRET }}
-      GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Validate Render trigger secrets
+      - name: Validate trigger secrets
         run: |
           set -euo pipefail
           test -n "$H1_AGENT_URL"
@@ -46,8 +41,8 @@ jobs:
       - name: Verify deployed release
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 24); do
-            version=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/version" 2>/tmp/version.err || true)
+          for attempt in $(seq 1 60); do
+            version=$(curl --fail-with-body --silent --show-error --max-time 15 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/version" 2>/tmp/version.err || true)
             echo "deployed release: $version"
             commit=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("commit", ""))' <<<"$version" 2>/dev/null || true)
             if [ "$commit" = "$GITHUB_SHA" ]; then
@@ -55,13 +50,13 @@ jobs:
             fi
             sleep 5
           done
-          echo "Render has not deployed GITHUB_SHA=$GITHUB_SHA."
+          echo "Render has not deployed $GITHUB_SHA."
           exit 1
 
-      - name: Snapshot existing findings
+      - name: Snapshot findings
         run: |
           set -euo pipefail
-          curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" > /tmp/baseline-findings.json
+          curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" > /tmp/baseline-findings.json
           python - <<'PY'
           import json
           payload = json.load(open("/tmp/baseline-findings.json", encoding="utf-8"))
@@ -69,87 +64,42 @@ jobs:
           open("/tmp/baseline-finding-ids", "w", encoding="utf-8").write("\n".join(sorted(ids)))
           PY
 
-      - name: Trigger Render bounty worker
+      - name: Start full autonomous hunt
         run: |
           set -euo pipefail
-          response=""
-          for attempt in $(seq 1 3); do
-            response=$(curl --fail-with-body --silent --show-error --max-time 60 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron")
-            echo "$response"
-            job_id=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); print(p.get("job_id") or p.get("id") or "")' <<<"$response" 2>/dev/null || true)
-            if [ -n "$job_id" ]; then
-              printf '%s' "$job_id" > /tmp/research-job-id
-              printf '%s\n' "$response" > /tmp/research-response.json
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "The autonomous research trigger did not return a persisted job id."
-          exit 1
+          response=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron")
+          echo "$response"
+          job_id=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); print(p.get("job_id") or p.get("id") or "")' <<<"$response")
+          test -n "$job_id"
+          printf '%s' "$job_id" > /tmp/research-job-id
 
-      - name: Poll persisted research job and report queue
+      - name: Wait until full report exists
         run: |
           set -u
           job_id=$(cat /tmp/research-job-id)
           for attempt in $(seq 1 32); do
-            job=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/research/jobs/$job_id" 2>/tmp/job.err || true)
+            job=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/research/jobs/$job_id" 2>/tmp/job.err || true)
             echo "research job: $job"
-
-            if printf '%s' "$job" | grep -q '"status":"error"'; then
-              echo "Autonomous research job failed."
-              exit 1
+            findings=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
+            candidate=$(python -c 'import json,sys; b=set(open("/tmp/baseline-finding-ids",encoding="utf-8").read().split()); p=json.loads(sys.stdin.read()); ok=False
+for f in p.get("findings") or []:
+ m=f.get("metadata") or {}
+ if str(f.get("id")) in b: continue
+ req=("title","summary","impact","reproduction","evidence","structured_scope_id")
+ md=("asset_identifier","affected_component","preconditions","observed_behavior","expected_behavior","attack_scenario","remediation","cvss_score","cvss_vector","report_markdown")
+ if str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in req) and isinstance(f.get("reproduction"),list) and f["reproduction"] and isinstance(f.get("evidence"),list) and f["evidence"] and all(str(m.get(k) or "").strip() for k in md) and m.get("weakness_id") is not None and not m.get("missing_validation"): ok=True; break
+print("yes" if ok else "no")' <<<"$findings" 2>/dev/null || echo no)
+            echo "full report candidate: $candidate"
+            if [ "$candidate" = "yes" ]; then
+              cp /tmp/findings.json /tmp/final-findings.json 2>/dev/null || true
+              exit 0
             fi
-
-            findings=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
-            if printf '%s' "$findings" | grep -q '"findings"'; then
-              printf '%s\n' "$findings" > /tmp/findings.json
-  candidate=$(python -c 'import json,sys; p=json.load(sys.stdin); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in ("title","summary","impact","reproduction","evidence","structured_scope_id")) and isinstance(f.get("reproduction"),list) and bool(f["reproduction"]) and isinstance(f.get("evidence"),list) and bool(f["evidence"]) and all(str((f.get("metadata") or {}).get(k) or "").strip() for k in ("asset_identifier","affected_component","preconditions","observed_behavior","expected_behavior","attack_scenario","remediation","cvss_score","cvss_vector")) and (f.get("metadata") or {}).get("weakness_id") is not None and not (f.get("metadata") or {}).get("missing_validation") for f in p.get("findings") or []); print("yes" if ok else "no")' <<<"$findings")
-            echo "new payable report-ready candidate: $candidate"
-              if [ "$candidate" = "yes" ]; then
-                cat /tmp/findings.json
-                printf '%s\n' "payable" > /tmp/hunt-result
-                exit 0
-              fi
-            fi
-
-            status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status", "unknown"))' <<<"$job" 2>/dev/null || echo unknown)
-            if [ "$status" = "completed" ]; then
-              echo "Research completed without an evidence-backed payable candidate; the next scheduled run will try again."
-              printf '%s\n' "none" > /tmp/hunt-result
+            status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status","unknown"))' <<<"$job" 2>/dev/null || echo unknown)
+            if [ "$status" = "completed" ] || [ "$status" = "error" ]; then
+              echo "Research ended without a complete report."
               exit 1
             fi
             sleep 15
           done
-          echo "Research verification window expired without an evidence-backed payable candidate."
-          printf '%s\n' "timeout" > /tmp/hunt-result
+          echo "Ten-minute report-generation window expired without a complete report."
           exit 1
-
-      - name: Publish hunt status
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -u
-          result="unknown"
-          if [ -f /tmp/hunt-result ]; then
-            result=$(cat /tmp/hunt-result)
-          fi
-          case "$result" in
-            payable)
-              state="success"
-              description="Evidence-backed payable report-ready candidate found"
-              ;;
-            none)
-              state="failure"
-              description="No evidence-backed payable candidate in this run"
-              ;;
-            timeout)
-              state="error"
-              description="Hunt timed out without a payable candidate"
-              ;;
-            *)
-              state="error"
-              description="Hunt ended without a definitive result"
-              ;;
-          esac
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA"             -f state="$state"             -f context="H1 Paid Bounty Hunt"             -f description="$description"             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
