@@ -58,7 +58,7 @@ def _maybe_auto_submit(settings,api,store,finding_id,handle,target,title,severit
     if not settings.auto_submit_findings: return None
     if not settings.enable_submission or not settings.hackerone_api_token: return {"status":"blocked","reason":"automatic submission gate is not fully enabled"}
     if settings.dry_run: return {"status":"blocked","reason":"DRY_RUN is enabled"}
-    if severity not in {"high", "critical"}: return {"status":"blocked","reason":"automatic submission requires high/critical severity"}
+    if severity not in {"low", "medium", "high", "critical"}: return {"status":"blocked","reason":"automatic submission requires a payable severity (low/medium/high/critical)"}
     if confidence < 0.90: return {"status":"blocked","reason":f"confidence {confidence:.2f} is below the 0.90 automatic-submission threshold"}
     if not reproduction or len(evidence_json)<10: return {"status":"blocked","reason":"insufficient reproduction/evidence"}
     if metadata.get("missing_validation"): return {"status":"blocked","reason":"finding still requires validation"}
@@ -251,9 +251,9 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
             if on_progress: on_progress({"phase":"selecting_program","program":opportunity.handle,"detail":"Selected bounty-eligible program for autonomous research","planned_targets":settings.autonomous_max_targets_per_program,"completed_targets":0})
             result=_research_program(settings,api,store,opportunity.handle,settings.autonomous_max_targets_per_program,active=False,deep=True,on_progress=on_progress,program_context={"handle":opportunity.handle,"name":opportunity.name,"state":opportunity.state,"offers_bounties":opportunity.offers_bounties})
             summary["researched_targets"]+=result.get("targets_checked",0); summary["created_findings"]+=result.get("created_findings",0); summary["findings"].extend(result.get("findings",[])); summary["skipped"].extend([{"program":opportunity.handle,"reason":x} for x in result.get("skipped",[])])
-            # Keep searching after low/medium findings; stop only when a high/critical
-            # candidate is produced so the autonomous hunt can surface stronger issues.
-            if any(str(item.get("severity") or "").lower() in {"high", "critical"} for item in result.get("findings", [])):
+            # Stop this hunt cycle as soon as any evidence-backed payable candidate is created.
+            # Severity is intentionally not restricted to high/critical.
+            if any(str(item.get("severity") or "").lower() in {"low", "medium", "high", "critical"} for item in result.get("findings", [])):
                 break
         summary["mode"]="autonomous-authorized-research"; return summary
     except Exception as exc: return {**summary,"status":"error","error":f"{exc.__class__.__name__}: {exc}","error_type":"worker"}
