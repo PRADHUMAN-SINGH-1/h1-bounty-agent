@@ -1,0 +1,164 @@
+name: Superhuman Docs Safe Hunt
+
+on:
+  push:
+    paths:
+      - ".github/workflows/docs-superhuman-safe-hunt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe docs.superhuman.com API/auth surface
+        shell: bash
+        run: |
+          set -u
+          python - <<'PY'
+          import json, subprocess, re
+          from pathlib import Path
+
+          base = "https://docs.superhuman.com"
+          targets = [
+              base + "/",
+              base + "/account",
+              base + "/apis/v1",
+              base + "/apis/v1/whoami",
+              base + "/apis/v1/docs",
+              base + "/apis/admin/v1",
+              base + "/apis/admin/v1/organizations",
+              base + "/apis/mcp",
+              base + "/apis/v1/docs/not-a-real-doc-id",
+              base + "/apis/admin/v1/organizations/not-a-real-org-id",
+          ]
+
+          rows = []
+          for u in targets:
+              p = subprocess.run(
+                  ["curl","-sS","--max-redirs","0","--connect-timeout","6","--max-time","12",
+                   "-A","H1-Bounty-Agent/0.4","-D","/tmp/h","-o","/tmp/b",u],
+                  text=True, capture_output=True
+              )
+              h = Path("/tmp/h").read_text(errors="replace")
+              b = Path("/tmp/b").read_text(errors="replace")
+              status = next((x for x in h.splitlines() if x.startswith("HTTP/")), "")
+              location = next((x.split(":",1)[1].strip() for x in h.splitlines()
+                               if x.lower().startswith("location:")), "")
+              ctype = next((x.split(":",1)[1].strip() for x in h.splitlines()
+                            if x.lower().startswith("content-type:")), "")
+              acao = next((x.split(":",1)[1].strip() for x in h.splitlines()
+                           if x.lower().startswith("access-control-allow-origin:")), "")
+              acac = next((x.split(":",1)[1].strip() for x in h.splitlines()
+                           if x.lower().startswith("access-control-allow-credentials:")), "")
+              row = {
+                  "url": u, "status": status, "location": location,
+                  "content_type": ctype, "access_control_allow_origin": acao,
+                  "access_control_allow_credentials": acac, "length": len(b),
+                  "body_prefix": b[:500]
+              }
+              rows.append(row)
+              print(json.dumps({k:v for k,v in row.items() if k != "body_prefix"},
+                               ensure_ascii=False))
+
+          Path("docs-surface-results.json").write_text(json.dumps(rows, indent=2))
+
+          findings = []
+
+          # Redirect validation: only flag if an in-scope endpoint actually emits
+          # an external Location supplied by the request.
+          canary = "https://example.invalid/h1-open-redirect-canary"
+          for path in ["/account","/signin","/login","/"]:
+              for key in ["next","redirect","url","returnTo","return_url","continue","destination"]:
+                  u = base + path + "?" + key + "=" + canary
+                  p = subprocess.run(
+                      ["curl","-sS","--max-redirs","0","--connect-timeout","6","--max-time","12",
+                       "-A","H1-Bounty-Agent/0.4","-D","/tmp/h","-o","/tmp/b",u],
+                      text=True, capture_output=True
+                  )
+                  h = Path("/tmp/h").read_text(errors="replace")
+                  loc = next((x.split(":",1)[1].strip() for x in h.splitlines()
+                              if x.lower().startswith("location:")), "")
+                  if canary in loc:
+                      f={"class":"open_redirect","url":u,"location":loc}
+                      findings.append(f); print(json.dumps(f))
+
+          # CORS: a credentialed reflection on auth-sensitive endpoints is worth
+          # manual validation; do not send cookies or tokens here.
+          for path in ["/apis/v1","/apis/v1/whoami","/apis/v1/docs","/apis/admin/v1",
+                       "/apis/admin/v1/organizations","/apis/mcp","/account"]:
+              u = base + path
+              p = subprocess.run(
+                  ["curl","-sS","--max-redirs","0","--connect-timeout","6","--max-time","12",
+                   "-A","H1-Bounty-Agent/0.4","-H","Origin: https://h1-cors-canary.invalid",
+                   "-D","/tmp/h","-o","/tmp/b",u],
+                  text=True, capture_output=True
+              )
+              h = Path("/tmp/h").read_text(errors="replace")
+              status = next((x for x in h.splitlines() if x.startswith("HTTP/")), "")
+              acao = next((x.split(":",1)[1].strip() for x in h.splitlines()
+                           if x.lower().startswith("access-control-allow-origin:")), "")
+              acac = next((x.split(":",1)[1].strip() for x in h.splitlines()
+                           if x.lower().startswith("access-control-allow-credentials:")), "")
+              if acao and (acao == "https://h1-cors-canary.invalid" or acao == "*") and acac.lower() == "true":
+                  findings.append({"class":"cors_credentialed_reflection","url":u,
+                                   "status":status,"acao":acao,"acac":acac})
+                  print(json.dumps(findings[-1]))
+
+          # MCP read-only handshake without credentials. This does not invoke any
+          # tool and only checks whether the transport enforces authentication.
+          init = json.dumps({
+              "jsonrpc":"2.0","id":1,"method":"initialize",
+              "params":{"protocolVersion":"2025-06-18",
+                        "capabilities":{},
+                        "clientInfo":{"name":"H1-Bounty-Agent","version":"0.4"}}
+          })
+          p = subprocess.run(
+              ["curl","-sS","--max-redirs","0","--connect-timeout","6","--max-time","15",
+               "-A","H1-Bounty-Agent/0.4","-H","Content-Type: application/json",
+               "-H","Accept: application/json, text/event-stream",
+               "-X","POST","--data",init,"-D","/tmp/mcp-h","-o","/tmp/mcp-b",base+"/apis/mcp"],
+              text=True, capture_output=True
+          )
+          mh=Path("/tmp/mcp-h").read_text(errors="replace")
+          mb=Path("/tmp/mcp-b").read_text(errors="replace")
+          mstatus=next((x for x in mh.splitlines() if x.startswith("HTTP/")), "")
+          msid=next((x.split(":",1)[1].strip() for x in mh.splitlines()
+                     if x.lower().startswith("mcp-session-id:")), "")
+          mrow={"url":base+"/apis/mcp","status":mstatus,"session_id_present":bool(msid),
+                "length":len(mb),"body_prefix":mb[:1200]}
+          Path("mcp-anonymous-init.json").write_text(json.dumps(mrow,indent=2))
+          print(json.dumps({k:v for k,v in mrow.items() if k!="body_prefix"},ensure_ascii=False))
+
+          if mstatus.startswith(("2","3")) and mb.strip():
+              findings.append({"class":"anonymous_mcp_transport_response","status":mstatus,
+                               "session_id_present":bool(msid),"body_prefix":mb[:600]})
+
+          Path("docs-findings.json").write_text(json.dumps(findings, indent=2))
+          report = []
+          if findings:
+              report.append("# POTENTIAL FINDINGS")
+              report.append("")
+              report.extend("- " + json.dumps(x, ensure_ascii=False) for x in findings)
+          else:
+              report = ["# NO VERIFIED FINDING FROM SAFE DOCS SURFACE TESTS",
+                        "",
+                        "No external redirect, credentialed CORS reflection, or authenticated MCP transport bypass was observed.",
+                        "Any 2xx/3xx anonymous response still requires manual authorization and impact validation."]
+          Path("docs-report.md").write_text("\n".join(report) + "\n")
+          PY
+
+      - name: Upload docs hunt evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-superhuman-safe-hunt
+          path: |
+            docs-surface-results.json
+            mcp-anonymous-init.json
+            docs-findings.json
+            docs-report.md
