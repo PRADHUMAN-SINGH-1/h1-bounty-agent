@@ -109,7 +109,7 @@ jobs:
               title=re.search(r'<title[^>]*>(.*?)</title>',body,re.I|re.S)
               title_text=re.sub(r'\s+',' ',title.group(1)).strip()[:300] if title else ''
               hits=[]
-              for pat in [r'\$FLAG\s*[:=]\s*[^<\s]{4,200}',r'FLAG\{[^}]{4,200}\}',r'H1\{[^}]{4,200}\}']:
+              for pat in [r'\$FLAG\s*[:=]\s*[^<\s]{4,200}',r'FLAG\{[^}]{4,200}\}',r'H1\{[A-Za-z0-9_-]{4,200}\}']:
                   hits.extend(re.findall(pat,body,re.I))
               row={'url':url,'status':status,'title':title_text,'body_length':len(body),'flag_hits':sorted(set(hits))[:10],'exit_code':p.returncode}
               rows.append(row)
