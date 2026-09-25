@@ -1,0 +1,70 @@
+name: Coda Proof Hunt
+
+on:
+  push:
+    paths:
+      - ".github/workflows/coda-proof.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe document 1198436185 without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, re, subprocess
+          from pathlib import Path
+          doc="1198436185"
+          urls=[
+            f"https://coda.io/d/{doc}",
+            f"https://coda.io/d/{doc}/view",
+            f"https://coda.io/d/{doc}/download",
+            f"https://coda.io/d/{doc}/export",
+            f"https://coda.grammarly.com/d/{doc}",
+            f"https://coda.grammarly.com/d/{doc}/view",
+            f"https://coda.grammarly.com/apis/v1/docs/{doc}",
+            f"https://coda.grammarly.com/api/2.0/docs/{doc}",
+          ]
+          rows=[]
+          for u in urls:
+            q=subprocess.run(["curl","-sS","-L","--max-redirs","5","--connect-timeout","8","--max-time","20","-A","Mozilla/5.0","-D","/tmp/h","-o","/tmp/b",u],text=True,capture_output=True)
+            h=Path("/tmp/h").read_text(errors="replace") if Path("/tmp/h").exists() else ""
+            b=Path("/tmp/b").read_text(errors="replace") if Path("/tmp/b").exists() else ""
+            statuses=re.findall(r"^HTTP/[^ ]+\s+(\d+)",h,re.M)
+            status=statuses[-1] if statuses else ""
+            ct=next((x.split(":",1)[1].strip() for x in h.splitlines() if x.lower().startswith("content-type:")),"")
+            evidence=[]
+            for pat in [r"\$FLAG\s*[:=]\s*[^<\s]{4,200}", r"FLAG\{[^}]{4,200}\}", r"document.{0,80}1198436185", r"(?i)(?:owner|email|username|workspace|document_content|content)["']?\s*:"]:
+              evidence += re.findall(pat,b,re.I)[:10]
+            row={"url":u,"status":status,"content_type":ct,"length":len(b),"contains_doc_id":doc in b,"evidence":sorted(set(evidence))[:20],"redirects": [x for x in h.splitlines() if x.lower().startswith("location:")][-5:]}
+            rows.append(row)
+            print(json.dumps(row,ensure_ascii=False))
+          Path("coda-proof.json").write_text(json.dumps(rows,indent=2))
+          hits=[r for r in rows if r["status"].startswith("2") and r["contains_doc_id"] and r["evidence"]]
+          if hits:
+            r=hits[0]
+            Path("coda-report.md").write_text(
+              "# Potential unauthenticated Coda document exposure\n\n"
+              f"Tested endpoint: {r['url']}\n"
+              f"HTTP status: {r['status']}\n"
+              f"Response length: {r['length']} bytes\n"
+              f"Evidence: {r['evidence']}\n\n"
+              "This report is generated only when the live response contains the target document ID and security-relevant fields."
+            )
+          else:
+            Path("coda-report.md").write_text("# NO VERIFIED Coda DOCUMENT EXPOSURE\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coda-proof
+          path: |
+            coda-proof.json
+            coda-report.md
