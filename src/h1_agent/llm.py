@@ -18,7 +18,9 @@ class LLMClient:
         self.model = settings.llm_model
 
     def _gateway_token(self) -> str:
-        return self.settings.llm_api_key or os.getenv("AI_GATEWAY_API_KEY", "") or os.getenv("VERCEL_OIDC_TOKEN", "")
+        if self.provider in {"vercel_gateway", "ai_gateway"}:
+            return self.settings.llm_api_key or os.getenv("AI_GATEWAY_API_KEY", "") or os.getenv("VERCEL_OIDC_TOKEN", "")
+        return os.getenv("AI_GATEWAY_API_KEY", "") or os.getenv("VERCEL_OIDC_TOKEN", "")
 
     def available(self) -> bool:
         if self.provider in {"vercel_gateway", "ai_gateway"}:
@@ -29,7 +31,7 @@ class LLMClient:
             except httpx.HTTPError:
                 return False
         if self.provider == "huggingface":
-            return bool(self.settings.hf_token)
+            return bool(self.settings.hf_token) or self._fallback_available()
         if self.provider in {"openai", "openai_compatible"}:
             return bool(self.settings.llm_api_key)
         return False
