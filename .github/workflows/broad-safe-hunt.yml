@@ -1,0 +1,200 @@
+name: Broad Safe Bounty Hunt
+
+on:
+  push:
+    paths:
+      - ".github/workflows/broad-safe-hunt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      H1_USER: ${{ secrets.HACKERONE_USERNAME }}
+      H1_TOKEN: ${{ secrets.HACKERONE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run bounded current-scope exposure hunt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, re, time
+          from urllib.parse import urlparse, urljoin, parse_qsl, urlencode, urlunparse
+          import httpx
+
+          auth=(__import__("os").environ["H1_USER"], __import__("os").environ["H1_TOKEN"])
+          client=httpx.Client(auth=auth, headers={"Accept":"application/json","User-Agent":"H1-Bounty-Agent/0.4"}, timeout=15.0, follow_redirects=False)
+
+          def get(path, **params):
+              r=client.get("https://api.hackerone.com/v1"+path, params=params or None)
+              r.raise_for_status()
+              return r.json()
+
+          def pages(path, key="data", page_size=100, max_pages=20):
+              out=[]
+              for page in range(1,max_pages+1):
+                  p=get(path, **{"page[number]":page,"page[size]":page_size})
+                  out.extend(p.get(key) or [])
+                  nxt=((p.get("links") or {}).get("next") or "")
+                  if not nxt: break
+              return out
+
+          programs=pages("/programs", max_pages=15)
+          candidates=[]
+          for item in programs:
+              a=item.get("attributes") or {}
+              handle=a.get("handle")
+              if not handle or a.get("state") not in {"public","active"} or not a.get("offers_bounties"):
+                  continue
+              try:
+                  sp=get(f"/programs/{handle}/structured_scopes", **{"page[number]":1,"page[size]":100})
+              except Exception:
+                  continue
+              scopes=[]
+              for s in sp.get("data") or []:
+                  sa=s.get("attributes") or {}
+                  if sa.get("eligible_for_bounty") and sa.get("eligible_for_submission"):
+                      ident=sa.get("asset_identifier") or ""
+                      typ=sa.get("asset_type") or ""
+                      if typ in {"URL","WILDCARD"}:
+                          scopes.append(sa)
+              if not scopes: continue
+              policy=str(a.get("policy") or a.get("description") or "").lower()
+              blocked_terms=("automated scan","automated scanning","no automated","do not run scanners","scanner prohibited")
+              if any(t in policy for t in blocked_terms):
+                  continue
+              score=(len(scopes)*4)+sum(1 for s in scopes if s.get("max_severity") in {"high","critical"})*2
+              candidates.append((score,handle,a,scopes))
+          candidates.sort(key=lambda x:(-x[0],x[1]))
+
+          selected=candidates[:12]
+          rows=[]
+          findings=[]
+
+          sensitive_token=re.compile(r'AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,}|sk_(?:live|test)_[A-Za-z0-9]{20,}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',re.I)
+          secret_key=re.compile(r'(?i)(password|passwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|private[_-]?key|session[_-]?token)')
+          redirect_name=re.compile(r'^(url|uri|next|redirect|redirect_uri|return|return_url|returnUrl|continue|destination|dest|target|targetPage|return_to|redirect_to)$',re.I)
+          canary="https://h1-proof-canary.invalid/"
+
+          def in_scope(url, scopes):
+              p=urlparse(url)
+              for s in scopes:
+                  ident=str(s.get("asset_identifier") or "")
+                  typ=str(s.get("asset_type") or "").upper()
+                  ip=urlparse(ident)
+                  if typ=="WILDCARD":
+                      host=ident.lower().lstrip("*.").rstrip("/")
+                      if (p.hostname or "").lower()==host or (p.hostname or "").lower().endswith("."+host):
+                          return s
+                  elif typ=="URL":
+                      if url.rstrip("/") == ident.rstrip("/") or url.startswith(ident.rstrip("/")+"/"):
+                          return s
+              return None
+
+          for score,handle,attrs,scopes in selected:
+              web_scopes=scopes
+              for s in web_scopes[:2]:
+                  ident=str(s.get("asset_identifier") or "").rstrip("/")
+                  if not ident.startswith(("http://","https://")):
+                      continue
+                  base=ident
+                  # A small fixed set of GET-only paths. Secrets are never written to artifacts.
+                  paths=["/","/.well-known/security.txt","/.git/HEAD","/.env","/openapi.json","/swagger.json","/api-docs","/actuator/env"]
+                  for path in paths:
+                      url=base+("" if path=="/" else path)
+                      if not in_scope(url, scopes): continue
+                      time.sleep(0.35)
+                      try:
+                          r=client.get(url)
+                      except Exception as exc:
+                          continue
+                      body=r.text[:750000]
+                      row={"program":handle,"url":url,"status":r.status_code,"length":len(body),
+                           "content_type":r.headers.get("content-type","")}
+                      if r.status_code in {200,206}:
+                          token_matches=sorted(set(m.group(0) for m in sensitive_token.finditer(body)))
+                          secret_fields=sorted(set(m.group(1).lower() for m in secret_key.finditer(body)))[:20]
+                          row["credential_pattern_classes"]=([x[:8]+"…REDACTED" for x in token_matches[:10]])
+                          row["sensitive_field_names"]=secret_fields
+                          if token_matches:
+                              findings.append({
+                                  "type":"credential_like_exposure",
+                                  "program":handle,
+                                  "url":url,
+                                  "status":r.status_code,
+                                  "length":len(body),
+                                  "credential_classes":row["credential_pattern_classes"],
+                              })
+                      rows.append(row)
+                      print(json.dumps(row,ensure_ascii=False))
+
+                  # Discover only same-origin GET links from the root and test up to 6 redirect-parameter links.
+                  try:
+                      r=client.get(base+"/")
+                      html=r.text[:1000000]
+                      links=re.findall(r'(?:href|src)=[\"\']([^\"\']+)',html,re.I)
+                      redirects=[]
+                      seen=set()
+                      for raw in links:
+                          u=urljoin(base+"/",raw)
+                          pu=urlparse(u)
+                          pb=urlparse(base+"/")
+                          if (pu.hostname or "").lower()!=(pb.hostname or "").lower(): continue
+                          if any(redirect_name.match(k) for k,_ in parse_qsl(pu.query,keep_blank_values=True)):
+                              if u not in seen and in_scope(u,scopes):
+                                  seen.add(u); redirects.append(u)
+                      for original in redirects[:6]:
+                          parsed=urlparse(original)
+                          q=[]
+                          for k,v in parse_qsl(parsed.query,keep_blank_values=True):
+                              q.append((k,canary if redirect_name.match(k) else v))
+                          test=urlunparse(parsed._replace(query=urlencode(q)))
+                          time.sleep(0.35)
+                          rr=client.get(test)
+                          loc=rr.headers.get("location","")
+                          row={"program":handle,"url":test,"status":rr.status_code,"location":loc}
+                          rows.append({"program":handle,"url":test,"status":rr.status_code,"length":len(rr.text[:100000]) ,"content_type":rr.headers.get("content-type",""),
+                                       "redirect_test":True,"location":loc})
+                          if loc.startswith(canary):
+                              findings.append({"type":"open_redirect","program":handle,"url":test,"status":rr.status_code,"location":loc})
+                              print(json.dumps(findings[-1],ensure_ascii=False))
+                  except Exception:
+                      pass
+
+          Path(__import__("pathlib").Path("broad-safe-results.json")).write_text(json.dumps({"selected":[{"handle":h,"score":s,"scope_count":len(sc)} for s,h,_,sc in selected],"results":rows,"findings":findings},indent=2))
+
+          report=__import__("pathlib").Path("broad-safe-report.md")
+          if findings:
+              f=findings[0]
+              if f["type"]=="open_redirect":
+                  report.write_text(
+                      "# Potential open redirect candidate\n\n"
+                      "## Program\n"+f["program"]+"\n\n"
+                      "## Endpoint\n"+f["url"].split("?",1)[0]+"\n\n"
+                      "## Observed behavior\nThe endpoint returned a redirect whose Location header pointed to the controlled external canary.\n\n"
+                      "## Evidence\n- Status: "+str(f["status"])+"\n- Location: "+f["location"]+"\n"
+                  )
+              else:
+                  report.write_text(
+                      "# Potential credential-like exposure candidate\n\n"
+                      "## Program\n"+f["program"]+"\n\n"
+                      "## Endpoint\n"+f["url"]+"\n\n"
+                      "## Observed behavior\nThe unauthenticated GET response returned a 2xx response containing a credential-like secret pattern. The artifact intentionally redacts the material.\n\n"
+                      "## Evidence\n- Status: "+str(f["status"])+"\n- Response length: "+str(f["length"])+" bytes\n- Pattern class: "+", ".join(f["credential_classes"])+"\n"
+                  )
+          else:
+              report.write_text("# NO VERIFIED BOUNTY FINDING\n\nNo tested current bounty-eligible target produced the evidence threshold used by this deterministic sweep.\n")
+          PY
+
+      - name: Upload hunt evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: broad-safe-hunt-evidence
+          path: |
+            broad-safe-results.json
+            broad-safe-report.md
