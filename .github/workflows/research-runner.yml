@@ -80,6 +80,9 @@ jobs:
             echo "full report candidate: $candidate"
             if [ "$candidate" = "yes" ]; then
               printf "%s\n" "payable" > /tmp/hunt-result
+              echo "===== FULL HACKERONE REPORT ====="
+              python -c 'import json,sys; b=set(open("/tmp/baseline-finding-ids",encoding="utf-8").read().split()); p=json.load(sys.stdin); f=next(x for x in p.get("findings") or [] if str(x.get("id")) not in b and (x.get("metadata") or {}).get("report_markdown")); print((f.get("metadata") or {}).get("report_markdown",""))' <<<"$findings"
+              echo "===== END FULL HACKERONE REPORT ====="
               exit 0
             fi
             status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status","unknown"))' <<<"$job" 2>/dev/null || echo unknown)
