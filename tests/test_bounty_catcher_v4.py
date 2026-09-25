@@ -33,8 +33,9 @@ def test_auto_submission_is_explicit_and_strict():
     worker = Path("src/h1_agent/worker.py").read_text(encoding="utf-8")
     assert 'auto_submit_findings: bool = _bool("AUTO_SUBMIT_FINDINGS", False)' in config
     assert "confidence < 0.90" in worker
-    assert 'severity not in {"high", "critical"}' in worker
+    assert 'severity not in {"low", "medium", "high", "critical"}' in worker
     assert "DRY_RUN" in config or "dry_run" in config
+    assert 'any(str(item.get("severity") or "").lower() in {"low", "medium", "high", "critical"}' in worker
 
 
 def test_global_hunt_button_exists():
