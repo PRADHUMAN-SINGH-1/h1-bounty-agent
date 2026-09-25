@@ -61,37 +61,37 @@ services:
       - key: AUTONOMOUS_PASSIVE_RESEARCH
         value: "false"
       - key: AUTONOMOUS_MAX_PROGRAMS
-        value: "5"
+        value: "1"
       - key: AUTONOMOUS_MAX_TARGETS_PER_PROGRAM
-        value: "5"
+        value: "1"
       - key: FULL_RESEARCH_MAX_TARGETS_PER_PROGRAM
         value: "50"
       - key: RESEARCH_TARGET_TIMEOUT_SECONDS
         value: "180"
       - key: DEEP_MAX_SCRIPTS
-        value: "30"
+        value: "10"
       - key: DEEP_MAX_QUERY_LINKS
-        value: "20"
+        value: "10"
       - key: DEEP_MAX_API_CANDIDATES
-        value: "30"
+        value: "15"
       - key: DEEP_MAX_OPENAPI_STEPS
-        value: "30"
+        value: "10"
       - key: DEEP_MAX_GRAPHQL_ENDPOINTS
-        value: "10"
+        value: "5"
       - key: DEEP_MAX_WEBSOCKET_ENDPOINTS
-        value: "10"
+        value: "5"
       - key: DEEP_MAX_CLOUD_TEXT_BYTES
         value: "4000000"
       - key: DEEP_MAX_PAGES
-        value: "30"
+        value: "10"
       - key: DEEP_MAX_PAGE_LINKS
-        value: "80"
+        value: "30"
       - key: TOOLCHAIN_ENABLED
         value: "true"
       - key: TOOLCHAIN_MAX_ROOTS
-        value: "10"
+        value: "1"
       - key: TOOLCHAIN_MAX_TARGETS
-        value: "20"
+        value: "5"
       - key: TOOLCHAIN_HTTPX_TIMEOUT_SECONDS
         value: "30"
       - key: TOOLCHAIN_KATANA_TIMEOUT_SECONDS
