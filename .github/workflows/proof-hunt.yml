@@ -1,4 +1,5 @@
 name: Target Proof Hunt
+# execute current public-surface proof checks
 
 on:
   push:
