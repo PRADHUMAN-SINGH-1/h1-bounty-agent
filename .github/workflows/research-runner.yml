@@ -38,7 +38,7 @@ jobs:
       - name: Verify deployed release
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 60); do
+          for attempt in $(seq 1 24); do
             version=$(curl --fail-with-body --silent --show-error --max-time 15 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/version" 2>/tmp/version.err || true)
             echo "deployed release: $version"
             commit=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("commit", ""))' <<<"$version" 2>/dev/null || true)
@@ -72,21 +72,44 @@ jobs:
         run: |
           set -u
           job_id=$(cat /tmp/research-job-id)
-          for attempt in $(seq 1 32); do
+          for attempt in $(seq 1 28); do
             job=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/research/jobs/$job_id" 2>/tmp/job.err || true)
             echo "research job: $job"
             findings=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
             candidate=$(python -c 'import json,sys; b=set(open("/tmp/baseline-finding-ids",encoding="utf-8").read().split()); p=json.loads(sys.stdin.read()); print("yes" if any(str(f.get("id")) not in b and str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in ("title","summary","impact","reproduction","evidence","structured_scope_id")) and isinstance(f.get("reproduction"),list) and bool(f["reproduction"]) and isinstance(f.get("evidence"),list) and bool(f["evidence"]) and all(str((f.get("metadata") or {}).get(k) or "").strip() for k in ("asset_identifier","affected_component","preconditions","observed_behavior","expected_behavior","attack_scenario","remediation","cvss_score","cvss_vector","report_markdown")) and (f.get("metadata") or {}).get("weakness_id") is not None and not (f.get("metadata") or {}).get("missing_validation") for f in p.get("findings") or []) else "no")' <<<"$findings" 2>/dev/null || echo no)
             echo "full report candidate: $candidate"
             if [ "$candidate" = "yes" ]; then
+              printf "%s\n" "payable" > /tmp/hunt-result
               exit 0
             fi
             status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status","unknown"))' <<<"$job" 2>/dev/null || echo unknown)
             if [ "$status" = "completed" ] || [ "$status" = "error" ]; then
+              printf "%s\n" "none" > /tmp/hunt-result
               echo "Research ended without a complete report."
               exit 1
             fi
             sleep 15
           done
+          printf "%s\n" "timeout" > /tmp/hunt-result
           echo "Ten-minute report-generation window expired without a complete report."
           exit 1
+
+      - name: Publish H1 hunt status
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          result="unknown"
+          if [ -f /tmp/hunt-result ]; then result=$(cat /tmp/hunt-result); fi
+          case "$result" in
+            payable) state="success"; description="Complete evidence-backed payable HackerOne report generated" ;;
+            none) state="failure"; description="No complete evidence-backed HackerOne report generated" ;;
+            timeout) state="error"; description="Ten-minute report-generation window expired" ;;
+            *) state="error"; description="Hunt ended without a definitive report result" ;;
+          esac
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+            -f state="$state" \
+            -f context="H1 Paid Bounty Hunt" \
+            -f description="$description" \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
