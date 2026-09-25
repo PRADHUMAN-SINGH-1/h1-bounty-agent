@@ -103,12 +103,8 @@ jobs:
             findings=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
             if printf '%s' "$findings" | grep -q '"findings"'; then
               printf '%s\n' "$findings" > /tmp/findings.json
-              candidate=$(python -c 'import json; b=set(open("/tmp/baseline-finding-ids",encoding="utf-8").read().split()); p=json.load(open("/tmp/findings.json",encoding="utf-8")); req=("title","summary","impact","reproduction","evidence","structured_scope_id"); mk=("asset_identifier","affected_component","observed_behavior","expected_behavior"); ok=False
-for f in p.get("findings") or []:
- m=f.get("metadata") or {}
- if str(f.get("id")) not in b and str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in req) and isinstance(f.get("reproduction"),list) and bool(f.get("reproduction")) and isinstance(f.get("evidence"),list) and bool(f.get("evidence")) and all(str(m.get(k) or "").strip() for k in mk) and not m.get("missing_validation"): ok=True; break
-print("yes" if ok else "no")')
-              echo "new payable report-ready candidate: $candidate"
+  candidate=$(python -c 'import json,sys; p=json.load(sys.stdin); ok=any(str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in ("title","summary","impact","reproduction","evidence","structured_scope_id")) and isinstance(f.get("reproduction"),list) and bool(f["reproduction"]) and isinstance(f.get("evidence"),list) and bool(f["evidence"]) and all(str((f.get("metadata") or {}).get(k) or "").strip() for k in ("asset_identifier","affected_component","preconditions","observed_behavior","expected_behavior","attack_scenario","remediation","cvss_score","cvss_vector")) and (f.get("metadata") or {}).get("weakness_id") is not None and not (f.get("metadata") or {}).get("missing_validation") for f in p.get("findings") or []); print("yes" if ok else "no")' <<<"$findings")
+            echo "new payable report-ready candidate: $candidate"
               if [ "$candidate" = "yes" ]; then
                 cat /tmp/findings.json
                 printf '%s\n' "payable" > /tmp/hunt-result
