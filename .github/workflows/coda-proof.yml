@@ -42,7 +42,13 @@ jobs:
             status=statuses[-1] if statuses else ""
             ct=next((x.split(":",1)[1].strip() for x in h.splitlines() if x.lower().startswith("content-type:")),"")
             evidence=[]
-            for pat in [r"\$FLAG\s*[:=]\s*[^<\s]{4,200}", r"FLAG\{[^}]{4,200}\}", r"document.{0,80}1198436185", r"(?i)(?:owner|email|username|workspace|document_content|content)["']?\s*:"]:
+            patterns=[
+              r"\$FLAG\s*[:=]\s*[^<\s]{4,200}",
+              r"FLAG\{[^}]{4,200}\}",
+              r"document.{0,80}1198436185",
+              r"(?i)(?:owner|email|username|workspace|document_content|content)\s*:"
+            ]
+            for pat in patterns:
               evidence += re.findall(pat,b,re.I)[:10]
             row={"url":u,"status":status,"content_type":ct,"length":len(b),"contains_doc_id":doc in b,"evidence":sorted(set(evidence))[:20],"redirects": [x for x in h.splitlines() if x.lower().startswith("location:")][-5:]}
             rows.append(row)
