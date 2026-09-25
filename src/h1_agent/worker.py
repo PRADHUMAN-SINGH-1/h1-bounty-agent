@@ -229,7 +229,7 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
             metadata_candidates.append((-cheap_score,handle,item))
         metadata_candidates.sort(key=lambda row:(row[0],row[1]))
 
-        scope_probe_limit=max(30, min(100, settings.autonomous_max_programs * 20))
+        scope_probe_limit=max(8, min(40, settings.autonomous_max_programs * 8))
         for _,handle,item in metadata_candidates[:scope_probe_limit]:
             attrs=item.get("attributes",{})
             try:
