@@ -257,7 +257,7 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         except Exception as exc:
             result["skipped"].append(f"{target}: duplicate screening failed: {exc.__class__.__name__}: {exc}")
             continue
-        # Deterministic fallback for directly demonstrated, high-signal findings does not require an LLM.
+        # Prefer a directly demonstrated, high-signal fallback when available; otherwise use the LLM.
         fallback_draft = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
         if fallback_draft is not None:
             draft = fallback_draft
@@ -265,29 +265,56 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
             if not llm_available:
                 result["skipped"].append(f"{target}: no hosted LLM configured and no deterministic evidence-backed candidate")
                 continue
-            matched_patterns=relevant_patterns(evidence,limit=12)
-        if on_progress:
-            on_progress({"program": handle, "target": target, "phase": "triaging_evidence", "detail": f"Evaluating {len(evidence_json)} evidence items", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
-        try:
-            triage=llm.triage_evidence(handle,target,{**(program_context or {}),"matched_patterns":[{"name":p.name,"classes":p.classes,"prerequisites":p.prerequisites,"strong_signals":p.strong_signals,"false_positive_traps":p.false_positive_traps,"impact":p.impact} for p in matched_patterns]},evidence_json); leads=triage.get("leads") if isinstance(triage.get("leads"),list) else []; leads=leads[:8]
-        except Exception as exc: leads=[]; result["skipped"].append(f"{target}: evidence triage failed: {exc}")
-        if on_progress: on_progress({"program":handle,"target":target,"phase":"drafting_report","detail":"Building an evidence-grounded candidate report","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
-        if on_progress:
-            on_progress({"program": handle, "target": target, "phase": "drafting_report", "detail": "Building an evidence-grounded candidate report", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
-        try:
-            draft=llm.draft_finding(handle,target,evidence_json,leads=leads,program_context=program_context or {})
-        except Exception as exc:
-            draft = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
-            if draft is None:
-                result["skipped"].append(f"{target}: LLM analysis failed: {exc}")
-                continue
-        if draft.get("status") != "candidate":
-            fallback = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
-            if fallback is not None:
-                draft = fallback
-            else:
-                result["skipped"].append(f"{target}: LLM evaluation returned status={draft.get('status')!r}; no bounty candidate was created from the collected evidence.")
-                continue
+            matched_patterns = relevant_patterns(evidence, limit=12)
+            if on_progress:
+                on_progress({"program": handle, "target": target, "phase": "triaging_evidence", "detail": f"Evaluating {len(evidence_json)} evidence items", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
+            try:
+                triage = llm.triage_evidence(
+                    handle,
+                    target,
+                    {
+                        **(program_context or {}),
+                        "matched_patterns": [
+                            {
+                                "name": p.name,
+                                "classes": p.classes,
+                                "prerequisites": p.prerequisites,
+                                "strong_signals": p.strong_signals,
+                                "false_positive_traps": p.false_positive_traps,
+                                "impact": p.impact,
+                            }
+                            for p in matched_patterns
+                        ],
+                    },
+                    evidence_json,
+                )
+                leads = triage.get("leads") if isinstance(triage.get("leads"), list) else []
+                leads = leads[:8]
+            except Exception as exc:
+                leads = []
+                result["skipped"].append(f"{target}: evidence triage failed: {exc}")
+            if on_progress:
+                on_progress({"program": handle, "target": target, "phase": "drafting_report", "detail": "Building an evidence-grounded candidate report", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
+            try:
+                draft = llm.draft_finding(
+                    handle,
+                    target,
+                    evidence_json,
+                    leads=leads,
+                    program_context=program_context or {},
+                )
+            except Exception as exc:
+                draft = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
+                if draft is None:
+                    result["skipped"].append(f"{target}: LLM analysis failed: {exc}")
+                    continue
+            if draft.get("status") != "candidate":
+                fallback = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
+                if fallback is not None:
+                    draft = fallback
+                else:
+                    result["skipped"].append(f"{target}: LLM evaluation returned status={draft.get('status')!r}; no bounty candidate was created from the collected evidence.")
+                    continue
         try: confidence=float(draft.get("confidence") or 0)
         except (TypeError,ValueError): confidence=0
         if confidence<0.70: continue
