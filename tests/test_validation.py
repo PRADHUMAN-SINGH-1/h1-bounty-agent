@@ -14,11 +14,16 @@ def test_complete_finding_passes():
         ["step"],
         [Evidence("x", "y", "z")],
         "1",
-        None,
+        1,
         {
             "affected_component": "Example endpoint",
+            "preconditions": "Unauthenticated user can reach the endpoint.",
             "observed_behavior": "Observed",
             "expected_behavior": "Expected",
+            "attack_scenario": "An attacker sends the documented request and obtains the demonstrated response.",
+            "remediation": "Enforce the documented authorization boundary.",
+            "cvss_score": 3.7,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
         },
     )
     assert validate_finding(finding).ok
@@ -58,8 +63,13 @@ def test_complete_bounty_report_passes():
         weakness_id=1,
         metadata={
             "affected_component": "Example endpoint",
+            "preconditions": "Attacker can reach the endpoint.",
             "observed_behavior": "Observed behavior",
             "expected_behavior": "Expected behavior",
+            "attack_scenario": "Attacker requests the endpoint and observes the demonstrated behavior.",
+            "remediation": "Enforce the expected access control.",
+            "cvss_score": 7.5,
+            "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
         },
     )
     assert validate_finding(finding).ok
