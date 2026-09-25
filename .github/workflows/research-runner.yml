@@ -1,5 +1,5 @@
 name: H1 Research Trigger
-# rerun after crawler fix
+# rerun after crawler and LLM fallback fixes
 
 on:
   schedule:
