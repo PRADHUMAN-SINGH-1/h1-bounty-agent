@@ -2,6 +2,7 @@ name: H1 Research Trigger
 # current autonomous hunt trigger
 # objective: find any evidence-backed, current, payable bounty (Low/Medium/High/Critical).
 # hunt kickoff: continue until any evidence-backed, bounty-eligible candidate is found or the run ends.
+# manual kickoff: push-triggered hunt requested 2026-09-25.
 
 on:
   schedule:
