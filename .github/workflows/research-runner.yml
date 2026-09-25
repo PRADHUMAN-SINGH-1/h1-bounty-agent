@@ -1,9 +1,9 @@
 name: H1 Research Trigger
-# rerun after crawler and LLM fallback fixes
+# prioritize immediate hunt; scheduled retries are spaced to avoid overlap
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
   push:
     paths:
@@ -16,10 +16,6 @@ on:
       - "src/h1_agent/llm.py"
       - "src/h1_agent/postgres_store.py"
       - "src/h1_agent/store.py"
-
-concurrency:
-  group: h1-autonomous-hunt
-  cancel-in-progress: false
 
 jobs:
   trigger:
