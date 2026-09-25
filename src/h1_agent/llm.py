@@ -18,7 +18,7 @@ class LLMClient:
         self.model = settings.llm_model
 
     def _gateway_token(self) -> str:
-        return self.settings.llm_api_key or os.getenv("VERCEL_OIDC_TOKEN", "")
+        return self.settings.llm_api_key or os.getenv("AI_GATEWAY_API_KEY", "") or os.getenv("VERCEL_OIDC_TOKEN", "")
 
     def available(self) -> bool:
         if self.provider in {"vercel_gateway", "ai_gateway"}:
@@ -33,6 +33,29 @@ class LLMClient:
         if self.provider in {"openai", "openai_compatible"}:
             return bool(self.settings.llm_api_key)
         return False
+
+    def _generate_gemini(self, prompt: str) -> str:
+        token = os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "")
+        if not token:
+            raise RuntimeError("Gemini fallback is not configured.")
+        model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        response = httpx.post(
+            url,
+            params={"key": token},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.05, "maxOutputTokens": 3500},
+            },
+            timeout=180,
+        )
+        response.raise_for_status()
+        data = response.json()
+        parts = ((data.get("candidates") or [{}])[0].get("content") or {}).get("parts") or []
+        return "".join(str(part.get("text") or "") for part in parts)
+
+    def _fallback_available(self) -> bool:
+        return bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or self._gateway_token())
 
     def generate(self, prompt: str) -> str:
         if self.provider in {"vercel_gateway", "ai_gateway"}:
@@ -56,9 +79,14 @@ class LLMClient:
                 },
                 timeout=180,
             )
-            response.raise_for_status()
-            data = response.json()
-            return str(data["choices"][0]["message"]["content"])
+            try:
+                response.raise_for_status()
+                data = response.json()
+                return str(data["choices"][0]["message"]["content"])
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in {402, 429, 500, 502, 503, 504} and (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
+                    return self._generate_gemini(prompt)
+                raise
 
         if self.provider == "ollama":
             response = httpx.post(
@@ -90,9 +118,27 @@ class LLMClient:
                 },
                 timeout=180,
             )
-            response.raise_for_status()
-            data = response.json()
-            return str(data["choices"][0]["message"]["content"])
+            try:
+                response.raise_for_status()
+                data = response.json()
+                return str(data["choices"][0]["message"]["content"])
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in {402, 429, 500, 502, 503, 504} and (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
+                    return self._generate_gemini(prompt)
+                if exc.response.status_code in {402, 429, 500, 502, 503, 504} and self._gateway_token():
+                    token = self._gateway_token()
+                    response = httpx.post(
+                        self.base_url.rstrip("/") + "/chat/completions" if self.provider in {"vercel_gateway", "ai_gateway"} else "https://ai-gateway.vercel.sh/v1/chat/completions",
+                        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                        json={"model": os.getenv("VERCEL_GATEWAY_MODEL", "inclusionai/ling-3.0-flash-vl-free"), "messages": [{"role": "user", "content": prompt}], "temperature": 0.05, "max_tokens": 3500, "stream": False},
+                        timeout=180,
+                    )
+                    response.raise_for_status()
+                    return str(response.json()["choices"][0]["message"]["content"])
+                raise
+
+        if self.provider == "gemini":
+            return self._generate_gemini(prompt)
 
         if self.provider in {"openai", "openai_compatible"}:
             response = httpx.post(
