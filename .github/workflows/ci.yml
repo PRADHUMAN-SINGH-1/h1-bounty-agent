@@ -439,3 +439,17 @@ jobs:
           path: |
             identity-oauth-probes.json
             identity-oauth-report.md
+
+  superhuman_service_mesh_hunt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test known Superhuman service endpoints
+        run: python scripts/superhuman_service_mesh_hunt.py
+      - name: Upload service mesh evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: superhuman-service-mesh-evidence
+          path: |
+            superhuman-service-mesh.json
+            superhuman-service-mesh-report.md
