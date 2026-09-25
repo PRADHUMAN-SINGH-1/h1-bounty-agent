@@ -1,0 +1,55 @@
+name: CTF Runtime Hunt
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ctf-runtime-hunt.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ctf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test classic document backends
+        shell: bash
+        run: |
+          set -u
+          python - <<'PY'
+          import json,re,subprocess
+          from pathlib import Path
+          doc='1198436185'
+          urls=[
+            f'https://app.grammarly.com/ddocs/{doc}',
+            f'https://dox.grammarly.com/documents/{doc}',
+            f'https://dox.grammarly.com/documents/{doc}/proofread',
+            f'https://dox.grammarly.com/documents/{doc}/ws',
+            f'https://capi.grammarly.com/api/documents/{doc}',
+            f'https://capi.grammarly.com/api/v1/documents/{doc}',
+            f'https://capi.grammarly.com/api/cheetah/v1/settings',
+          ]
+          out=[]
+          for u in urls:
+            q=subprocess.run(['curl','-sS','-L','--max-redirs','5','--connect-timeout','6','--max-time','15','-A','Mozilla/5.0','-D','/tmp/h','-o','/tmp/b',u],text=True,capture_output=True)
+            h=Path('/tmp/h').read_text(errors='replace') if Path('/tmp/h').exists() else ''
+            b=Path('/tmp/b').read_text(errors='replace') if Path('/tmp/b').exists() else ''
+            statuses=re.findall(r'^HTTP/[^ ]+\s+(\d+)',h,re.M)
+            status=statuses[-1] if statuses else ''
+            ct=next((x.split(':',1)[1].strip() for x in h.splitlines() if x.lower().startswith('content-type:')),'')
+            signals=[]
+            for pat in [r'\$FLAG\s*[:=]\s*[^<\s]{4,500}',r'FLAG\{[^}]{4,500}\}',r'1198436185',r'h1_ctf@grammarly\.com',r'(?i)(?:documentId|document_id|owner|email|username|content)\s*[:=]']:
+              signals += re.findall(pat,b)[:20]
+            row={'url':u,'status':status,'content_type':ct,'length':len(b),'signals':sorted(set(signals))[:30],'body_prefix':b[:1500],'stderr':q.stderr[-400:]}
+            out.append(row)
+            print(json.dumps({k:v for k,v in row.items() if k!='body_prefix'},ensure_ascii=False))
+          Path('ctf-runtime.json').write_text(json.dumps(out,indent=2))
+          PY
+      - name: Upload runtime evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-runtime-evidence
+          path: ctf-runtime.json
