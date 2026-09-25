@@ -41,7 +41,13 @@ def _target_for_asset(asset) -> str | None:
 
 def _select_research_assets(scopes,max_assets:int,*,exhaustive:bool=False):
     seen=set(); assets=[]
-    for asset in sorted(scopes,key=lambda a:(0 if a.eligible_for_bounty else 1,str(a.asset_type).upper(),str(a.asset_identifier).lower())):
+
+    def sort_key(asset):
+        eligible_rank=0 if asset.eligible_for_bounty else 1
+        target_rank=0 if _target_for_asset(asset) else 1
+        return (eligible_rank,target_rank,str(asset.asset_type).upper(),str(asset.asset_identifier).lower())
+
+    for asset in sorted(scopes,key=sort_key):
         if not asset.eligible_for_submission or not asset.eligible_for_bounty or asset.instruction: continue
         identifier=asset.asset_identifier.strip()
         if not identifier or identifier in seen: continue
@@ -75,7 +81,7 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
     result={"program":handle,"targets_checked":0,"created_findings":0,"evidence_collected":0,"checks_run":0,"findings":[],"skipped":[],"asset_types":{},"status":"ok"}
     if on_progress: on_progress({"program":handle,"phase":"loading_scope","target":None,"planned_targets":0,"completed_targets":0})
     try:
-        scopes_payload=api._structured_scopes_page(handle,1,100)
+        scopes_payload=api.structured_scopes(handle)
         scopes=normalize_scopes(scopes_payload)
         store.save_scopes(handle,scopes_payload)
     except Exception as exc:
@@ -223,7 +229,7 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
             metadata_candidates.append((-cheap_score,handle,item))
         metadata_candidates.sort(key=lambda row:(row[0],row[1]))
 
-        scope_probe_limit=max(30, min(75, settings.autonomous_max_programs * 20))
+        scope_probe_limit=max(30, min(100, settings.autonomous_max_programs * 20))
         for _,handle,item in metadata_candidates[:scope_probe_limit]:
             attrs=item.get("attributes",{})
             try:
