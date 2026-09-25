@@ -77,6 +77,93 @@ def _maybe_auto_submit(settings,api,store,finding_id,handle,target,title,severit
     store.mark_submitted(finding_id,payload); return {"status":"submitted","report_id":str(payload.get("data",{}).get("id") or "")}
 
 
+def _rule_based_candidate(handle: str, target: str, asset, evidence: list[Evidence], program_context: dict) -> dict | None:
+    """Create a complete candidate only from a directly demonstrated, high-signal probe."""
+    redirect_obs = [item for item in evidence if item.name == "open_redirect_observation"]
+    if not redirect_obs:
+        return None
+
+    policy = str((program_context or {}).get("policy") or "").lower()
+    # Honor an explicit policy exclusion when it is plainly stated.
+    if "open redirect" in policy and any(term in policy for term in ("not accepted", "out of scope", "excluded")):
+        return None
+
+    redirect = next((item for item in evidence if item.name == "redirect_parameter"), None)
+    location = next((item for item in evidence if item.name == "location"), None)
+    if redirect is None or location is None or not redirect.source:
+        return None
+
+    duplicate_screen = (program_context or {}).get("duplicate_screening") or {}
+    if duplicate_screen.get("status") != "checked":
+        return None
+    target_host = (urlparse(target).hostname or "").lower()
+    for report in duplicate_screen.get("disclosed_reports") or []:
+        title = str(report.get("title") or "").lower()
+        url = str(report.get("url") or "").lower()
+        cwe = str(report.get("cwe") or "")
+        if ("open redirect" in title or cwe == "601") and (not url or target_host in url):
+            return None
+
+    parameter = str(redirect.value).strip()
+    probe_url = redirect.source
+    external_location = str(location.value).strip()
+    evidence_subset = [
+        item for item in evidence
+        if item.name in {"redirect_parameter", "status", "location", "open_redirect_observation"}
+        and item.source == probe_url
+    ]
+    if len(evidence_subset) < 4:
+        evidence_subset = redirect_obs + [redirect, location]
+        evidence_subset = list(dict.fromkeys(evidence_subset))
+
+    title = f"Open redirect via {parameter} on {target_host}"
+    summary = (
+        f"The in-scope URL {probe_url} accepted the {parameter} parameter and returned an HTTP "
+        f"Location header pointing to the external canary {external_location}. This demonstrates "
+        "server-side redirection to an attacker-controlled destination."
+    )
+    impact = (
+        "An attacker can construct an in-scope link that redirects a victim to an external domain. "
+        "The reproduced behavior changes the destination selected by the application's redirect mechanism; "
+        "the evidence does not establish credential theft or another downstream compromise."
+    )
+    reproduction = [
+        f"Request the following in-scope URL without following redirects: {probe_url}",
+        f"Observe the HTTP response Location header: {external_location}",
+        "Confirm that the browser/client is instructed to navigate to the external canary domain."
+    ]
+    metadata = {
+        "asset_type": asset.asset_type,
+        "asset_identifier": asset.asset_identifier,
+        "scope_reference": asset.reference or "",
+        "scope_max_severity": asset.max_severity or "",
+        "affected_component": f"Redirect handling for the '{parameter}' query parameter on {target_host}.",
+        "preconditions": "The attacker can send a victim an in-scope URL containing the redirect parameter.",
+        "observed_behavior": f"The tested URL returned Location: {external_location}, an external canary destination.",
+        "expected_behavior": "The application should reject external redirect destinations or constrain redirects to approved same-site destinations.",
+        "attack_scenario": f"An attacker sends a victim the crafted URL {probe_url}. The application responds with Location: {external_location}, causing navigation away from the in-scope origin.",
+        "remediation": "Validate redirect destinations server-side and allow only approved same-origin or explicitly allowlisted destinations.",
+        "references": [probe_url],
+        "weakness_name": "Open Redirect (CWE-601)",
+        "weakness_id": 601,
+        "cvss_score": 4.3,
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N",
+        "missing_validation": [],
+    }
+    return {
+        "status": "candidate",
+        "title": title,
+        "summary": summary,
+        "impact": impact,
+        "reproduction": reproduction,
+        "severity": "low",
+        "confidence": 0.95,
+        "weakness_id": 601,
+        "metadata": metadata,
+        "evidence": evidence_subset,
+    }
+
+
 def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=False,on_progress=None,program_context=None):
     result={"program":handle,"targets_checked":0,"created_findings":0,"evidence_collected":0,"checks_run":0,"findings":[],"skipped":[],"asset_types":{},"status":"ok"}
     if on_progress: on_progress({"program":handle,"phase":"loading_scope","target":None,"planned_targets":0,"completed_targets":0})
@@ -180,11 +267,20 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
         if on_progress: on_progress({"program":handle,"target":target,"phase":"drafting_report","detail":"Building an evidence-grounded candidate report","planned_targets":len(selected_assets),"completed_targets":index,"evidence_collected":len(evidence_json)})
         if on_progress:
             on_progress({"program": handle, "target": target, "phase": "drafting_report", "detail": "Building an evidence-grounded candidate report", "planned_targets": len(selected_assets), "completed_targets": index, "evidence_collected": len(evidence_json)})
-        try: draft=llm.draft_finding(handle,target,evidence_json,leads=leads,program_context=program_context or {})
-        except Exception as exc: result["skipped"].append(f"{target}: LLM analysis failed: {exc}"); continue
+        try:
+            draft=llm.draft_finding(handle,target,evidence_json,leads=leads,program_context=program_context or {})
+        except Exception as exc:
+            draft = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
+            if draft is None:
+                result["skipped"].append(f"{target}: LLM analysis failed: {exc}")
+                continue
         if draft.get("status") != "candidate":
-            result["skipped"].append(f"{target}: LLM evaluation returned status={draft.get('status')!r}; no bounty candidate was created from the collected evidence.")
-            continue
+            fallback = _rule_based_candidate(handle, target, asset, evidence, program_context or {})
+            if fallback is not None:
+                draft = fallback
+            else:
+                result["skipped"].append(f"{target}: LLM evaluation returned status={draft.get('status')!r}; no bounty candidate was created from the collected evidence.")
+                continue
         try: confidence=float(draft.get("confidence") or 0)
         except (TypeError,ValueError): confidence=0
         if confidence<0.70: continue
