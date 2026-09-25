@@ -207,7 +207,27 @@ def _research_program(settings,api,store,handle,max_targets,*,active=False,deep=
             "cvss_vector": draft.get("cvss_vector") or "",
             "missing_validation": draft.get("missing_validation") or [],
         }
-        finding_id=store.create_finding({"program_handle":handle,"target":target,"title":draft.get("title",""),"severity":draft.get("severity"),"state":"needs_review","summary":draft.get("summary",""),"impact":draft.get("impact",""),"reproduction":draft.get("reproduction",[]),"evidence":evidence_json,"structured_scope_id":asset.id,"weakness_id":weakness_id,"metadata":metadata}); result["created_findings"]+=1; result["findings"].append({"id":finding_id,"program":handle,"target":target,"title":draft.get("title",""),"severity":draft.get("severity"),"confidence":confidence})
+        candidate = Finding(
+            program_handle=handle,
+            target=target,
+            title=draft.get("title", ""),
+            severity=draft.get("severity"),
+            state="needs_review",
+            summary=draft.get("summary", ""),
+            impact=draft.get("impact", ""),
+            reproduction=draft.get("reproduction", []),
+            evidence=[Evidence(**item) for item in evidence_json],
+            structured_scope_id=asset.id,
+            weakness_id=weakness_id,
+            metadata=metadata,
+        )
+        validation = validate_finding(candidate)
+        if not validation.ok:
+            result["skipped"].append(f"{target}: report completeness gate failed: {'; '.join(validation.blockers)}")
+            continue
+        finding_id=store.create_finding({"program_handle":handle,"target":target,"title":candidate.title,"severity":candidate.severity,"state":"needs_review","summary":candidate.summary,"impact":candidate.impact,"reproduction":candidate.reproduction,"evidence":evidence_json,"structured_scope_id":asset.id,"weakness_id":weakness_id,"metadata":metadata})
+        result["created_findings"]+=1
+        result["findings"].append({"id":finding_id,"program":handle,"target":target,"title":candidate.title,"severity":candidate.severity,"confidence":confidence})
         if settings.auto_submit_findings:
             try: result["findings"][-1]["auto_submission"]=_maybe_auto_submit(settings,api,store,finding_id,handle,target,draft.get("title",""),draft.get("severity"),confidence,draft.get("summary",""),draft.get("impact",""),draft.get("reproduction",[]),evidence_json,asset,scopes,metadata)
             except Exception as exc: result["skipped"].append(f"{target}: automatic submission blocked: {exc}")
