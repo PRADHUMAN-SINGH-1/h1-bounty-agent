@@ -387,6 +387,8 @@ def run_cycle(settings: Settings, requested_programs: set[str] | None = None, ac
                     result=_research_program(settings,api,store,handle,settings.full_research_max_targets_per_program if selected_deep else settings.autonomous_max_targets_per_program,active=selected_active,deep=selected_deep,on_progress=on_progress,program_context={"handle":handle,"name":attrs.get("name") or handle,"state":attrs.get("state") or "","policy":attrs.get("policy") or attrs.get("description") or ""})
                 except Exception as exc: result={"program":handle,"status":"error","error":f"{exc.__class__.__name__}: {exc}","targets_checked":0,"created_findings":0,"findings":[],"skipped":[]}
                 per_program.append(result); summary["researched_targets"]+=result.get("targets_checked",0); summary["created_findings"]+=result.get("created_findings",0); summary["findings"].extend(result.get("findings",[])); summary["skipped"].extend([{"program":handle,"reason":x} for x in result.get("skipped",[])])
+            if result.get("evidence_samples"):
+                summary.setdefault("evidence_samples", {}).update(result["evidence_samples"])
             summary["program_results"]=per_program; return summary
         payload={"data":[]}
         max_pages=12
