@@ -411,3 +411,17 @@ jobs:
           path: |
             coda-direct-api-proof.json
             coda-direct-api-report.md
+
+  docs_safe_hunt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Superhuman Docs safe hunt
+        run: python scripts/docs_superhuman_safe_hunt.py
+      - name: Upload Superhuman Docs hunt evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-superhuman-ci-evidence
+          path: |
+            docs-superhuman-results.json
+            docs-superhuman-report.md
