@@ -28,3 +28,66 @@ jobs:
           Path("/tmp/dashboard.js").write_text(script)
           PY
           node --check /tmp/dashboard.js
+
+
+  h1-hunt:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      statuses: write
+    env:
+      H1_AGENT_URL: ${{ secrets.H1_AGENT_URL || secrets.RENDER_URL }}
+      CRON_SECRET: ${{ secrets.CRON_SECRET || secrets.H1_CRON_SECRET }}
+    steps:
+      - name: Validate hunt secrets
+        run: |
+          set -euo pipefail
+          test -n "$H1_AGENT_URL"
+          test -n "$CRON_SECRET"
+      - name: Verify deployed release
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 18); do
+            version=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/version" 2>/tmp/version.err || true)
+            echo "deployed release: $version"
+            commit=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("commit", ""))' <<<"$version" 2>/dev/null || true)
+            if [ "$commit" = "$GITHUB_SHA" ]; then exit 0; fi
+            sleep 5
+          done
+          echo "Render has not deployed $GITHUB_SHA."
+          exit 1
+      - name: Trigger autonomous hunt
+        run: |
+          set -euo pipefail
+          response=$(curl --fail-with-body --silent --show-error --max-time 45 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron")
+          echo "$response"
+          job_id=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); print(p.get("job_id") or p.get("id") or "")' <<<"$response")
+          test -n "$job_id"
+          printf '%s' "$job_id" > /tmp/research-job-id
+      - name: Wait for full verified report candidate
+        run: |
+          set -u
+          job_id=$(cat /tmp/research-job-id)
+          for attempt in $(seq 1 32); do
+            job=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/research/jobs/$job_id" 2>/tmp/job.err || true)
+            echo "research job: $job"
+            findings=$(curl --fail-with-body --silent --show-error --max-time 20 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron/findings" 2>/tmp/findings.err || true)
+            candidate=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); ok=False
+for f in p.get("findings") or []:
+ m=f.get("metadata") or {}
+ if str(f.get("state")) in {"needs_review","approved","submitted"} and str(f.get("severity") or "").lower() in {"low","medium","high","critical"} and all(str(f.get(k) or "").strip() for k in ("title","summary","impact","reproduction","evidence","structured_scope_id")) and isinstance(f.get("reproduction"),list) and f["reproduction"] and isinstance(f.get("evidence"),list) and f["evidence"] and all(str(m.get(k) or "").strip() for k in ("asset_identifier","affected_component","preconditions","observed_behavior","expected_behavior","attack_scenario","remediation","cvss_score","cvss_vector")) and m.get("weakness_id") is not None and not m.get("missing_validation"): ok=True; break
+print("yes" if ok else "no")' <<<"$findings" 2>/dev/null || echo no)
+            echo "full verified report candidate: $candidate"
+            if [ "$candidate" = "yes" ]; then exit 0; fi
+            status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status","unknown"))' <<<"$job" 2>/dev/null || echo unknown)
+            if [ "$status" = "completed" ] || [ "$status" = "error" ]; then
+              echo "Hunt ended before a complete verified report candidate was produced."
+              exit 1
+            fi
+            sleep 15
+          done
+          echo "Ten-minute hunt window ended without a complete verified report candidate."
+          exit 1
