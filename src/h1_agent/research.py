@@ -34,15 +34,25 @@ from .scope import require_in_scope, target_is_in_scope
 
 def same_origin(left: str, right: str) -> bool:
     """Return True when two URLs share scheme, hostname, and effective port."""
-    a = urlparse(left)
-    b = urlparse(right)
-    if a.scheme.lower() != b.scheme.lower() or (a.hostname or "").lower() != (b.hostname or "").lower():
+    try:
+        a = urlparse(left)
+        b = urlparse(right)
+        if a.scheme.lower() != b.scheme.lower() or (a.hostname or "").lower() != (b.hostname or "").lower():
+            return False
+
+        def effective_port(parsed):
+            try:
+                explicit = parsed.port
+            except ValueError:
+                return None
+            if explicit is not None:
+                return explicit
+            scheme = parsed.scheme.lower()
+            return 443 if scheme == "https" else 80 if scheme == "http" else None
+
+        return effective_port(a) is not None and effective_port(a) == effective_port(b)
+    except (TypeError, ValueError):
         return False
-    def effective_port(parsed):
-        if parsed.port is not None:
-            return parsed.port
-        return 443 if parsed.scheme.lower() == "https" else 80 if parsed.scheme.lower() == "http" else None
-    return effective_port(a) == effective_port(b)
 
 from .vulnerability_checks import (
     api_spec_probe,
@@ -107,15 +117,24 @@ class LowImpactResearch:
     def _get(self, url: str, **kwargs) -> httpx.Response:
         self._wait()
         kwargs.setdefault("timeout", self._request_timeout())
-        return self.client.get(url, **kwargs)
+        try:
+            return self.client.get(url, **kwargs)
+        except (httpx.InvalidURL, ValueError) as exc:
+            raise httpx.ReadError(f"invalid research URL: {url}", request=None) from exc
 
     def _options(self, url: str) -> httpx.Response:
         self._wait()
-        return self.client.options(url, timeout=self._request_timeout())
+        try:
+            return self.client.options(url, timeout=self._request_timeout())
+        except (httpx.InvalidURL, ValueError) as exc:
+            raise httpx.ReadError(f"invalid research URL: {url}", request=None) from exc
 
     def _head(self, url: str) -> httpx.Response:
         self._wait()
-        return self.client.head(url, follow_redirects=False, timeout=self._request_timeout())
+        try:
+            return self.client.head(url, follow_redirects=False, timeout=self._request_timeout())
+        except (httpx.InvalidURL, ValueError) as exc:
+            raise httpx.ReadError(f"invalid research URL: {url}", request=None) from exc
 
     def run(
         self,
