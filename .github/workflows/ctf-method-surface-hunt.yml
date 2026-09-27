@@ -1,0 +1,26 @@
+name: CTF Method Surface Hunt
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/ctf_method_surface_hunt.py"
+      - ".github/workflows/ctf-method-surface-hunt.yml"
+permissions:
+  contents: read
+jobs:
+  ctf-surface:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Run read-only CTF surface checks
+        run: python scripts/ctf_method_surface_hunt.py
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-method-surface-evidence
+          path: |
+            ctf-method-surface-results.json
+            ctf-method-surface-report.md
