@@ -239,3 +239,12 @@ uvicorn api.index:app --reload
 This project can automate a substantial amount of authorized reconnaissance, evidence collection, hypothesis generation, and report drafting, but **no software can guarantee that every hunt produces a valid paid vulnerability**. A candidate becomes a real report only after the evidence is independently reproducible and the current program rules permit the activity.
 
 That distinction is intentional: the agent optimizes for reproducible security evidence rather than manufacturing findings to make the dashboard look successful.
+
+
+## 2026-09-27 Hunt Results
+
+Recent authorized, low-impact bounty research recorded on `main`:
+- Amazon VRP: no verified reflected XSS or external redirect on tested public/app surfaces.
+- Elastic VRP: 321 `*.elastic.co` certificate names reviewed; no verified subdomain takeover. `eden.elastic.co` was confirmed to redirect from its S3 website endpoint to `demo.prod.sa.elastic.co`, so it is not a dangling bucket.
+- GitHub VRP: redirect-bearing public pages rejected the external canary; public search rendering returned no JavaScript execution across code/issues/repository/global search probes.
+- Current status: no confirmed bounty finding from these passes. Do not submit speculative reports.
