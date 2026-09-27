@@ -1,0 +1,21 @@
+name: GitLab Label Permission Diff Detail
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Extract exact controller diff
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout --depth=40 https://gitlab.com/gitlab-org/gitlab.git gitlab-src
+          cd gitlab-src
+          git fetch --depth=1 origin 8ac38618a6d22975a6711e897d4f265f4e108a88
+          git show --format= --unified=40 8ac38618a6d22975a6711e897d4f265f4e108a88 -- app/controllers/projects/labels_controller.rb > /tmp/diff.txt
+          cat /tmp/diff.txt
