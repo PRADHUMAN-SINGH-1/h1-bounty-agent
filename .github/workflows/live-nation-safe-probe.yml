@@ -1,0 +1,36 @@
+name: Live Nation Safe Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/live-nation-safe-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Public GET-only probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://signup.ticketmaster.com/bugbountytest'
+          echo '== HEADERS =='
+          curl -sSIkL --max-redirs 5 "$base" | sed -n '1,80p'
+          echo '== HTML =='
+          curl -sSL --max-redirs 5 "$base" -o /tmp/page.html
+          wc -c /tmp/page.html
+          grep -Eo 'https?://[^" ]+|src=["'\'''][^"'\''']+|href=["'\'''][^"'\''']+' /tmp/page.html | head -80 || true
+          echo '== META/SECURITY =='
+          grep -Ei 'content-security-policy|x-frame-options|strict-transport-security|referrer-policy|permissions-policy|csrf|token|api' /tmp/page.html | head -120 || true
+          echo '== COMMON ARTIFACTS =='
+          for p in robots.txt sitemap.xml .well-known/security.txt manifest.json asset-manifest.json; do
+            echo "--- $p"
+            curl -sSIL --max-redirs 3 "https://signup.ticketmaster.com/$p" | sed -n '1,20p'
+          done
+          echo '== QUERY CANARIES =='
+          for q in             '?next=https%3A%2F%2Fexample.com%2Fcanary'             '?redirect=https%3A%2F%2Fexample.com%2Fcanary'             '?return_to=https%3A%2F%2Fexample.com%2Fcanary'             '?callback=https%3A%2F%2Fexample.com%2Fcanary'; do
+            echo "--- $q"
+            curl -sSikL --max-redirs 5 "https://signup.ticketmaster.com/bugbountytest$q" | sed -n '1,35p'
+          done
