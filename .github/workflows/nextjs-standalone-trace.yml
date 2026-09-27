@@ -42,6 +42,8 @@ jobs:
             return <main>{somePkg.value}</main>
           }
           EOF
+          npm install --ignore-scripts
+          mkdir -p node_modules/some-pkg
           cat > node_modules/some-pkg/package.json <<'EOF'
           {"name":"some-pkg","version":"1.0.0","main":"index.js"}
           EOF
@@ -56,7 +58,6 @@ jobs:
           cat > app-owned-private.txt <<'EOF'
           H1_SYNTHETIC_SECRET_DO_NOT_TRACE
           EOF
-          npm install --ignore-scripts
           echo '=== versions ==='
           node -v
           npx next --version
