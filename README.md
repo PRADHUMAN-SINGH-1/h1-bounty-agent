@@ -241,6 +241,9 @@ This project can automate a substantial amount of authorized reconnaissance, evi
 That distinction is intentional: the agent optimizes for reproducible security evidence rather than manufacturing findings to make the dashboard look successful.
 
 
+
+The September 27 proof rerun after the workflow/test fixes completed successfully. The live Superhuman/Grammarly checks covered redirect, CORS, CTF document/API, wildcard exposure, identity/OAuth, service-mesh, and related public-surface paths; no check produced a reproducible bounty finding. The resulting artifacts explicitly record no verified redirect, no verified CORS regression, no verified CTF exposure, no verified wildcard secret exposure, and no verified document-data exposure. The Coda API check returned 401/404 on direct document endpoints; the authenticated service paths tested returned authorization failures rather than a bypass. HackerOne requires human validation and a reproducible proof before submission, so these negative results remain non-findings rather than reports.
+
 ## 2026-09-27 Hunt Results
 
 Recent authorized, low-impact bounty research recorded on `main`:
