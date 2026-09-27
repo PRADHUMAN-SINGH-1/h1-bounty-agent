@@ -46,7 +46,13 @@ scripts=[]
 for raw in re.findall(r'''<script[^>]+src=["']([^"']+)["']''',html,re.I):
     u=urljoin(SEED,raw)
     if (urlparse(u).hostname or '').lower() == 'www.grammarly.com': scripts.append(u)
-scripts=list(dict.fromkeys(scripts))[:80]
+for raw in re.findall(r'''(?:"|')(https://[^"']+?\.js(?:\?[^"']*)?)(?:"|')''',html,re.I):
+    u=raw
+    if (urlparse(u).hostname or '').lower() == 'www.grammarly.com': scripts.append(u)
+for raw in re.findall(r'''["']([^"']+?\.js(?:\?[^"']*)?)["']''',html,re.I):
+    u=urljoin(SEED,raw)
+    if (urlparse(u).hostname or '').lower() == 'www.grammarly.com': scripts.append(u)
+scripts=list(dict.fromkeys(scripts))[:120]
 bundle_hits=[]
 all_candidates=set()
 for u in scripts:
