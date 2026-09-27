@@ -1,0 +1,35 @@
+name: Kong Public XSS Hunt
+
+on:
+  push:
+    paths:
+      - "scripts/kong_public_xss_hunt.py"
+      - ".github/workflows/kong-public-xss-hunt.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kong-public-xss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install browser test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Run Kong public XSS hunt
+        run: python scripts/kong_public_xss_hunt.py
+      - name: Upload Kong XSS evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: kong-public-xss-evidence
+          path: |
+            kong-public-xss-results.json
+            kong-public-xss-report.md
