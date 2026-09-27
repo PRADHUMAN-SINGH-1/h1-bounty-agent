@@ -1,0 +1,24 @@
+name: CTF Historical Snapshot Hunt
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/ctf_wayback_hunt.py
+      - .github/workflows/ctf-wayback-hunt.yml
+permissions:
+  contents: read
+jobs:
+  wayback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve historical snapshots
+        run: python scripts/ctf_wayback_hunt.py
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-wayback-evidence
+          path: |
+            ctf-wayback-results.json
+            ctf-wayback-report.md
