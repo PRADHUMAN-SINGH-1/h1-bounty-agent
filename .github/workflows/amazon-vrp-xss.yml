@@ -30,7 +30,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/xss-test.mjs <<'EOF'
+          cat > xss-test.mjs <<'EOF
           import { chromium } from 'playwright';
 
           const ua = 'amazonvrpresearcher_pradyuman1';
@@ -85,4 +85,4 @@ jobs:
           if (!finding) console.log('NO_VERIFIED_REFLECTED_XSS');
           if (finding) process.exit(42);
           EOF
-          node /tmp/xss-test.mjs
+          node xss-test.mjs
