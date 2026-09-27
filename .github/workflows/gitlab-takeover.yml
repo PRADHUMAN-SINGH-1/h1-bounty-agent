@@ -1,0 +1,89 @@
+name: GitLab Subdomain Takeover Sweep
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gitlab-takeover.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Certificate and DNS sweep
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p gitlab-takeover
+          python - <<'PY'
+          import json, urllib.request, subprocess, re
+          from pathlib import Path
+
+          data=json.loads(urllib.request.urlopen("https://crt.sh/?q=%25.gitlab.com&output=json",timeout=30).read())
+          hosts=set()
+          for c in data:
+            for n in c.get("name_value","").splitlines():
+              n=n.strip().lower().lstrip("*.")
+              if n.endswith(".gitlab.com") and "*" not in n and len(n)<120:
+                hosts.add(n)
+
+          Path("gitlab-takeover/candidates.txt").write_text("\n".join(sorted(hosts))+"\n")
+          print("CERT_NAMES",len(hosts))
+
+          provider_sigs={
+            "github_pages":["There isn't a GitHub Pages site here.","For root or user pages"],
+            "heroku":["No such app","no such app"],
+            "aws_s3":["NoSuchBucket","The specified bucket does not exist"],
+            "azure":["Web App - Unavailable","404 Web Site not found"],
+            "fastly":["Fastly error: unknown domain"],
+            "netlify":["Not Found - Request ID"],
+            "shopify":["Sorry, this shop is currently unavailable"],
+            "readme":["Project not found"],
+            "zendesk":["Help Center Closed","Sorry, we couldn't find the page"],
+          }
+
+          suspects=[]
+          for i,host in enumerate(sorted(hosts)):
+            if i>=700:
+              break
+            try:
+              cn=subprocess.check_output(["dig","+short",host,"CNAME"],text=True,stderr=subprocess.DEVNULL,timeout=5).strip().splitlines()
+            except: continue
+            cn=[x.rstrip(".") for x in cn if x.strip()]
+            if not cn: continue
+            target=cn[-1]
+            if target.endswith("gitlab.com") or target.endswith("gitlab.io"):
+              continue
+            try:
+              r=urllib.request.Request("https://"+host+"/",headers={"User-Agent":"gitlab-bbp-researcher"},method="GET")
+              with urllib.request.urlopen(r,timeout=10) as rr:
+                body=rr.read(12000).decode("utf-8","replace")
+                status=rr.status
+            except Exception as e:
+              status=repr(e); body=""
+            print("CANDIDATE",host,"CNAME",target,"STATUS",status)
+            low=body.lower()
+            matched=[]
+            for provider,sigs in provider_sigs.items():
+              for sig in sigs:
+                if sig.lower() in low:
+                  matched.append(provider+":"+sig)
+            if matched:
+              suspects.append({"host":host,"cname":target,"status":status,"matches":matched,"sample":body[:1500]})
+
+          Path("gitlab-takeover/suspects.json").write_text(json.dumps(suspects,indent=2))
+          print("SUSPECT_COUNT",len(suspects))
+          for s in suspects:
+            print("SUSPECT",json.dumps(s,separators=(",",":")))
+          PY
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitlab-takeover-evidence
+          path: gitlab-takeover/
