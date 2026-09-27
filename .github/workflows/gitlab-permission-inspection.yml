@@ -1,0 +1,28 @@
+name: GitLab Permission Fix Inspection
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gitlab-permission-inspection.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect fresh permission change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout --depth=100 https://gitlab.com/gitlab-org/gitlab.git gitlab-src
+          cd gitlab-src
+          git fetch --depth=1 origin 8ac38618a6d22975a6711e897d4f265f4e108a88
+          echo '=== STAT ==='
+          git show --stat --oneline --decorate 8ac38618a6d22975a6711e897d4f265f4e108a88
+          echo '=== DIFF ==='
+          git show --format=fuller --find-renames 8ac38618a6d22975a6711e897d4f265f4e108a88 -- | sed -n '1,260p'
