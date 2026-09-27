@@ -1,0 +1,98 @@
+name: Next.js 16.3.6 Standalone Trace Exposure
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/nextjs-standalone-trace.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Create minimal Next.js application
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/next-trace-test
+          mkdir -p /tmp/next-trace-test/app /tmp/next-trace-test/node_modules/some-pkg
+          cd /tmp/next-trace-test
+          cat > package.json <<'EOF'
+          {"private":true,"scripts":{"build":"next build --turbopack"},"dependencies":{"next":"16.3.6","react":"19.1.1","react-dom":"19.1.1"}}
+          EOF
+          cat > next.config.js <<'EOF'
+          /** @type {import('next').NextConfig} */
+          const nextConfig = { output: 'standalone' }
+          module.exports = nextConfig
+          EOF
+          cat > app/page.js <<'EOF'
+          import somePkg from 'some-pkg'
+          export default function Page() {
+            return <main>{somePkg.value}</main>
+          }
+          EOF
+          cat > node_modules/some-pkg/package.json <<'EOF'
+          {"name":"some-pkg","version":"1.0.0","main":"index.js"}
+          EOF
+          cat > node_modules/some-pkg/index.js <<'EOF'
+          const path = require('path')
+          function resolve(dir) {
+            return path.resolve(dir || '.')
+          }
+          resolve(process.env.H1_ADDON_DIR)
+          module.exports = { value: 'ok' }
+          EOF
+          cat > app-owned-private.txt <<'EOF'
+          H1_SYNTHETIC_SECRET_DO_NOT_TRACE
+          EOF
+          npm install --ignore-scripts
+          echo '=== versions ==='
+          node -v
+          npx next --version
+
+      - name: Build with Turbopack
+        shell: bash
+        working-directory: /tmp/next-trace-test
+        run: |
+          set -euo pipefail
+          npm run build
+
+      - name: Prove whether application-owned secret entered trace
+        shell: bash
+        working-directory: /tmp/next-trace-test
+        run: |
+          set -euo pipefail
+          echo '=== candidate trace files ==='
+          find .next -type f \( -name '*.nft.json' -o -path '*/standalone/*' \) -print | sort | head -300
+          echo '=== secret search in build output ==='
+          hits=0
+          if grep -R -n --binary-files=without-match 'H1_SYNTHETIC_SECRET_DO_NOT_TRACE' .next; then
+            hits=1
+          fi
+          echo "SECRET_HITS=$hits"
+          echo '=== trace path search ==='
+          grep -R -n --binary-files=without-match 'app-owned-private.txt' .next 2>/dev/null || true
+          if [ "$hits" -eq 1 ]; then
+            cat > verified-bounty-evidence.md <<'EOF'
+          # VERIFIED: Application-owned file included by Next.js 16.3.6 Turbopack tracing
+
+          Next.js 16.3.6 standalone build output contains the synthetic application-owned secret file after a dependency calls path.resolve(dir || '.') with an unresolved environment variable.
+          EOF
+            exit 42
+          fi
+          cat > verified-bounty-evidence.md <<'EOF'
+          # NO VERIFIED TRACE EXPOSURE
+
+          The synthetic application-owned secret was not present in .next output for this test.
+          EOF
