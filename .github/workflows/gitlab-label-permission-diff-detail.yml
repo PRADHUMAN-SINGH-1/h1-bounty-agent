@@ -2,6 +2,9 @@ name: GitLab Label Permission Diff Detail
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gitlab-label-permission-diff-detail.yml"
 
 permissions:
   contents: read
