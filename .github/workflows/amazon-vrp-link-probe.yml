@@ -1,0 +1,112 @@
+name: Amazon VRP Link-Derived Redirect Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/amazon-vrp-link-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Crawl first-party Amazon.in links
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re, requests
+          from urllib.parse import urljoin, urlparse, parse_qsl, urlencode, urlunparse
+
+          UA = "amazonvrpresearcher_pradyuman1"
+          s = requests.Session()
+          s.headers["User-Agent"] = UA
+          base = "https://www.amazon.in/"
+          r = s.get(base, timeout=25, allow_redirects=False)
+          print("HOME_STATUS", r.status_code)
+          print("HOME_LOCATION", r.headers.get("Location"))
+          html = r.text
+
+          urls = []
+          for m in re.finditer(r'''(?:href|action)=["']([^"']+)["']''', html, re.I):
+              u = urljoin(base, m.group(1))
+              p = urlparse(u)
+              if p.scheme in ("http","https") and p.netloc.endswith(".amazon.in") or p.netloc == "www.amazon.in":
+                  urls.append(u)
+
+          urls = sorted(set(urls))
+          print("FIRST_PARTY_URLS", len(urls))
+          for u in urls[:500]:
+              print("URL", u[:500])
+
+          suspicious = []
+          keys = re.compile(r"(redirect|return|continue|dest|destination|callback|next|url|target|forward|goto)", re.I)
+          for u in urls:
+              p = urlparse(u)
+              pairs = parse_qsl(p.query, keep_blank_values=True)
+              if any(keys.search(k) for k,_ in pairs):
+                  suspicious.append((u,pairs))
+
+          print("SUSPICIOUS_URLS", len(suspicious))
+          for u,pairs in suspicious[:120]:
+              print("SUSPICIOUS", u[:600])
+          PY
+
+      - name: Test discovered redirect-like parameters
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re, requests
+          from urllib.parse import urljoin, urlparse, parse_qsl, urlencode, urlunparse
+
+          UA = "amazonvrpresearcher_pradyuman1"
+          s = requests.Session()
+          s.headers["User-Agent"] = UA
+          base = "https://www.amazon.in/"
+          html = s.get(base, timeout=25).text
+
+          urls=[]
+          for m in re.finditer(r'''(?:href|action)=["']([^"']+)["']''', html, re.I):
+              u=urljoin(base,m.group(1))
+              p=urlparse(u)
+              if p.scheme in ("http","https") and (p.netloc=="www.amazon.in" or p.netloc.endswith(".amazon.in")):
+                  urls.append(u)
+
+          keys=re.compile(r"(redirect|return|continue|dest|destination|callback|next|url|target|forward|goto)",re.I)
+          tested=set()
+
+          for u in sorted(set(urls)):
+              p=urlparse(u)
+              pairs=parse_qsl(p.query,keep_blank_values=True)
+              for idx,(k,v) in enumerate(pairs):
+                  if not keys.search(k):
+                      continue
+                  if len(tested)>=30:
+                      break
+                  pairs2=list(pairs)
+                  pairs2[idx]=(k,"https://example.com/canary")
+                  q=urlencode(pairs2,doseq=True)
+                  test=urlunparse((p.scheme,p.netloc,p.path,p.params,q,p.fragment))
+                  key=(p.path,k)
+                  if key in tested:
+                      continue
+                  tested.add(key)
+                  print("===TEST", test[:900])
+                  try:
+                      rr=s.get(test,timeout=20,allow_redirects=False)
+                      print("STATUS",rr.status_code,"LOCATION",rr.headers.get("Location"))
+                      if rr.headers.get("Location","").startswith(("http://example.com/canary","https://example.com/canary")):
+                          print("VERIFIED_FINDING external_redirect",test)
+                          raise SystemExit(42)
+                  except requests.RequestException as e:
+                      print("ERROR",repr(e))
+                  import time; time.sleep(2)
+              if len(tested)>=30:
+                  break
+          print("NO_VERIFIED_EXTERNAL_REDIRECT")
+          PY
