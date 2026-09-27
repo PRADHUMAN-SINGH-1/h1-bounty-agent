@@ -1,0 +1,27 @@
+name: CTF Deeper Readonly Hunt
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/ctf_deeper_readonly_hunt.py
+      - .github/workflows/ctf-deeper-readonly-hunt.yml
+
+permissions:
+  contents: read
+
+jobs:
+  ctf-deeper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run bounded public client/API analysis
+        run: python scripts/ctf_deeper_readonly_hunt.py
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-deeper-readonly-evidence
+          path: |
+            ctf-deeper-results.json
+            ctf-deeper-report.md
