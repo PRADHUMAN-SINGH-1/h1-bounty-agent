@@ -29,6 +29,13 @@ jobs:
           targets = [
               "https://app.files.com/",
           ]
+          redirect_urls = [
+              "https://app.files.com/login_from_oauth?provider=azure&redirect_uri=https%3A%2F%2Fexample.com%2Fcanary",
+              "https://app.files.com/login?next=https%3A%2F%2Fexample.com%2Fcanary",
+              "https://app.files.com/login?redirect=https%3A%2F%2Fexample.com%2Fcanary",
+              "https://app.files.com/login?redirect_to=https%3A%2F%2Fexample.com%2Fcanary",
+              "https://app.files.com/login?return_to=https%3A%2F%2Fexample.com%2Fcanary",
+          ]
           api_paths = [
               "/api/rest/v1/api_key.json",
               "/api/rest/v1/permissions.json",
@@ -112,6 +119,18 @@ jobs:
                           api_refs=sorted(set(re.findall(r"(?<![A-Za-z0-9_])(/api/rest/v1/[A-Za-z0-9_./{}-]+)",rr.text)))
                           for ref in api_refs[:100]:
                               print(json.dumps({"js_api_reference":ref,"source_sha256":hashlib.sha256(rr.text.encode("utf-8","replace")).hexdigest()},ensure_ascii=False))
+                  except Exception as exc:
+                      print(json.dumps({"url":u,"error":str(exc)},ensure_ascii=False))
+
+              for u in redirect_urls:
+                  try:
+                      rr=client.get(u)
+                      loc=rr.headers.get("location","")
+                      row=record("GET",u,rr,rr.text)
+                      row["redirect_location"]=loc
+                      print(json.dumps(row,ensure_ascii=False))
+                      if rr.status_code in (301,302,303,307,308) and urlparse(loc).netloc=="example.com":
+                          findings.append({"type":"open_redirect_candidate","url":u,"status":rr.status_code,"location":loc,"body_sha256":row["body_sha256"]})
                   except Exception as exc:
                       print(json.dumps({"url":u,"error":str(exc)},ensure_ascii=False))
 
