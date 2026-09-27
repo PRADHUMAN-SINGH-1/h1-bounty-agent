@@ -1,0 +1,30 @@
+name: Kong Algolia Unpublished Hunt
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/kong_algolia_unpublished_hunt.py"
+      - ".github/workflows/kong-algolia-unpublished-hunt.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  algolia-unpublished:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run Algolia unpublished-content check
+        run: python scripts/kong_algolia_unpublished_hunt.py
+      - name: Upload Algolia evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: kong-algolia-unpublished-evidence
+          path: |
+            kong-algolia-unpublished-results.json
+            kong-algolia-unpublished-report.md
