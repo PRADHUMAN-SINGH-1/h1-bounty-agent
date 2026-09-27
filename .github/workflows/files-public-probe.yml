@@ -137,6 +137,7 @@ jobs:
                       if rr.status_code in (200,206):
                           refs=sorted(set(re.findall(r'https?://[^\\s"<>]+|/api/[A-Za-z0-9_./-]+',rr.text[:200000])))
                           if refs:
+                              print(json.dumps({"oauth_reference_scan":u,"keyword_hits":sorted(set(re.findall(r"(?i)(oauth|sso|authorize|callback|login)",rr.text[:500000])))[:20],"body_sha256":row["body_sha256"]},ensure_ascii=False))
                               print(json.dumps({"artifact_reference_sample":u,"references":refs[:100],"body_sha256":row["body_sha256"]},ensure_ascii=False))
                   except Exception as exc:
                       print(json.dumps({"url":u,"error":str(exc)},ensure_ascii=False))
