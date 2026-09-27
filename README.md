@@ -251,3 +251,10 @@ Recent authorized, low-impact bounty research recorded on `main`:
 - Elastic VRP: 321 `*.elastic.co` certificate names reviewed; no verified subdomain takeover. `eden.elastic.co` was confirmed to redirect from its S3 website endpoint to `demo.prod.sa.elastic.co`, so it is not a dangling bucket.
 - GitHub VRP: redirect-bearing public pages rejected the external canary; public search rendering returned no JavaScript execution across code/issues/repository/global search probes.
 - Current status: no confirmed bounty finding from these passes. Do not submit speculative reports.
+
+
+## Files.com API permission-boundary research
+
+The repository now includes `tools/files_api_permission_probe.py`. It performs a bounded, read-only check against the researcher-owned Files.com BUGBOUNTY trial using a Files Only user API key. The probe tests documented Site Admin-only API endpoints, paces requests at 1 request/second, stores no response bodies, and stops immediately if a documented admin-only endpoint returns 2xx.
+
+This path is intended to validate an actual API authorization boundary before any HackerOne report is drafted. It does not submit reports automatically and does not test customer sites.
