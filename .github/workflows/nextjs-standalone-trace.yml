@@ -74,26 +74,39 @@ jobs:
         working-directory: /tmp/next-trace-test
         run: |
           set -euo pipefail
-          echo '=== candidate trace files ==='
-          find .next -type f \( -name '*.nft.json' -o -path '*/standalone/*' \) -print | sort | head -300
-          echo '=== secret search in build output ==='
-          hits=0
-          if grep -R -n --binary-files=without-match 'H1_SYNTHETIC_SECRET_DO_NOT_TRACE' .next; then
-            hits=1
-          fi
-          echo "SECRET_HITS=$hits"
-          echo '=== trace path search ==='
-          grep -R -n --binary-files=without-match 'app-owned-private.txt' .next 2>/dev/null || true
-          if [ "$hits" -eq 1 ]; then
-            cat > verified-bounty-evidence.md <<'EOF'
-          # VERIFIED: Application-owned file included by Next.js 16.3.6 Turbopack tracing
-
-          Next.js 16.3.6 standalone build output contains the synthetic application-owned secret file after a dependency calls path.resolve(dir || '.') with an unresolved environment variable.
-          EOF
-            exit 42
-          fi
-          cat > verified-bounty-evidence.md <<'EOF'
-          # NO VERIFIED TRACE EXPOSURE
-
-          The synthetic application-owned secret was not present in .next output for this test.
-          EOF
+          python - <<'PY'
+          from pathlib import Path
+          root=Path(".next/standalone")
+          secret=b"H1_SYNTHETIC_SECRET_DO_NOT_TRACE"
+          copied=[p for p in root.rglob("*") if p.is_file() and p.name=="app-owned-private.txt"]
+          print("COPIED_PRIVATE_FILES=", [str(p) for p in copied])
+          nft_hits=[]
+          for p in Path(".next").rglob("*.nft.json"):
+              try:
+                  data=p.read_bytes()
+              except OSError:
+                  continue
+              if b"app-owned-private.txt" in data:
+                  nft_hits.append(str(p))
+          print("NFT_REFERENCES=", nft_hits)
+          content_hits=[]
+          for p in copied:
+              try:
+                  if secret in p.read_bytes():
+                      content_hits.append(str(p))
+              except OSError:
+                  pass
+          print("SECRET_CONTENT_HITS=", content_hits)
+          if copied or nft_hits or content_hits:
+              Path("verified-bounty-evidence.md").write_text(
+                  "# VERIFIED TRACE EXPOSURE\n\n"
+                  "Next.js 16.3.6 Turbopack standalone output or NFT trace includes "
+                  "the application-owned synthetic private file after a dependency "
+                  "uses path.resolve(dir || '.') with an unresolved environment variable.\n"
+              )
+              raise SystemExit(42)
+          Path("verified-bounty-evidence.md").write_text(
+              "# NO VERIFIED TRACE EXPOSURE\n\n"
+              "No standalone/NFT reference to app-owned-private.txt was found.\n"
+          )
+          PY
