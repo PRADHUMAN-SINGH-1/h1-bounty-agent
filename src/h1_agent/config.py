@@ -41,14 +41,8 @@ def _csv(name: str) -> tuple[str, ...]:
 
 def _llm_provider() -> str:
     configured = _raw("LLM_PROVIDER", "")
-    # Prefer a directly configured Gemini key over an exhausted routed provider.
-    # This keeps the production worker on an available first-party path when a
-    # Gemini credential is already present in the service environment.
     if os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"):
         return "gemini"
-    # Vercel deployments must not silently point at a developer-local Ollama
-    # endpoint. An explicit Ollama selection is overridden by the hosted
-    # gateway; other explicit providers remain respected.
     if os.getenv("VERCEL") and configured == "ollama":
         return "vercel_gateway"
     if configured:
@@ -130,9 +124,6 @@ class Settings:
     llm_api_key: str = _raw("LLM_API_KEY")
 
     def __post_init__(self) -> None:
-        # Resolve provider-dependent LLM settings at instance creation so
-        # test/deployment environment overrides cannot leave stale module-time
-        # dataclass defaults behind.
         provider = _llm_provider()
         object.__setattr__(self, "llm_provider", provider)
         object.__setattr__(self, "llm_base_url", _llm_base_url(provider))
@@ -171,7 +162,7 @@ class Settings:
     def require_autonomous_research(self) -> None:
         if not self.autonomous_research:
             raise RuntimeError("Autonomous research is disabled.")
-        # An empty allowlist means "let the discovery engine choose eligible
-        # bounty programs". A non-empty allowlist remains an explicit filter.
-        # Autonomous mode itself stays passive/read-only unless active testing
-        # is explicitly enabled through the separate assessment path.
+        if not self.research_program_allowlist:
+            raise RuntimeError(
+                "Autonomous research is blocked until RESEARCH_PROGRAM_ALLOWLIST contains explicitly authorized HackerOne program handles."
+            )
