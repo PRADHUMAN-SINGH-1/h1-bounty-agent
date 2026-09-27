@@ -1,0 +1,24 @@
+name: Kong Public Search XSS Hunt
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/kong_search_xss_hunt.py
+      - .github/workflows/kong-public-search-xss-hunt.yml
+permissions:
+  contents: read
+jobs:
+  xss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test reflected input on public search
+        run: python scripts/kong_search_xss_hunt.py
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: kong-search-xss-evidence
+          path: |
+            kong-search-xss-results.json
+            kong-search-xss-report.md
