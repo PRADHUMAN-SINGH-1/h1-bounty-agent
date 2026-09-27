@@ -1,0 +1,66 @@
+name: GitHub Redirect Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/github-redirect-discovery.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover and test redirect parameters
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re, requests
+          from urllib.parse import urljoin, urlparse, parse_qs, urlencode, urlunparse
+          s=requests.Session()
+          s.headers["User-Agent"]="github-vrp-researcher"
+          pages=[
+            "https://github.com/",
+            "https://github.com/login",
+            "https://github.com/join",
+            "https://github.com/explore",
+            "https://github.com/settings/profile",
+            "https://gist.github.com/"
+          ]
+          candidates=[]
+          for page in pages:
+            try:
+              r=s.get(page,timeout=12,allow_redirects=False)
+              print("PAGE",page,"STATUS",r.status_code,"LOCATION",r.headers.get("Location"))
+              html=r.text
+              for m in re.finditer(r'href=["\']([^"\']+)["\']',html,re.I):
+                u=urljoin(page,m.group(1))
+                if urlparse(u).hostname in {"github.com","gist.github.com"}:
+                  qs=parse_qs(urlparse(u).query,keep_blank_values=True)
+                  keys={k.lower() for k in qs}
+                  if keys & {"redirect","redirect_to","return_to","return","next","continue","url","target"}:
+                    candidates.append(u)
+            except Exception as e: print("ERROR_PAGE",page,repr(e))
+          seen=set()
+          for u in candidates:
+            if u in seen: continue
+            seen.add(u)
+            p=urlparse(u)
+            qs=parse_qs(p.query,keep_blank_values=True)
+            for k in list(qs):
+              if k.lower() in {"redirect","redirect_to","return_to","return","next","continue","url","target"}:
+                q=dict(qs); q[k]=["https://example.com/h1-canary"]
+                test=urlunparse((p.scheme,p.netloc,p.path,p.params,urlencode(q,doseq=True),p.fragment))
+                try:
+                  rr=s.get(test,timeout=12,allow_redirects=False)
+                  print("TEST",test,"STATUS",rr.status_code,"LOCATION",rr.headers.get("Location"))
+                  if rr.is_redirect and (rr.headers.get("Location") or "").startswith("https://example.com/h1-canary"):
+                    print("VERIFIED_EXTERNAL_REDIRECT",test)
+                except Exception as e: print("ERROR_TEST",test,repr(e))
+          print("CANDIDATE_COUNT",len(seen))
+          PY
