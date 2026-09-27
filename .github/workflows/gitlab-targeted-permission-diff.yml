@@ -1,0 +1,27 @@
+name: GitLab Targeted Permission Diff
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gitlab-targeted-permission-diff.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Inspect only label controller changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout --depth=50 https://gitlab.com/gitlab-org/gitlab.git gitlab-src
+          cd gitlab-src
+          git fetch --depth=1 origin 8ac38618a6d22975a6711e897d4f265f4e108a88
+          echo "=== changed paths ==="
+          git diff-tree --no-commit-id --name-only -r 8ac38618a6d22975a6711e897d4f265f4e108a88 | grep -E 'labels_controller|label.*permission|permission.*label' || true
+          echo "=== relevant diff ==="
+          git show --format= --find-renames 8ac38618a6d22975a6711e897d4f265f4e108a88 -- '*labels_controller*' '*label*permission*' '*permission*label*' | sed -n '1,500p'
