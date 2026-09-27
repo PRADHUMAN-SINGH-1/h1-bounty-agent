@@ -1,0 +1,26 @@
+name: CTF Download Exposure Hunt
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/ctf_download_hunt.py"
+      - ".github/workflows/ctf-download-exposure-hunt.yml"
+permissions:
+  contents: read
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - name: Run CTF download checks
+        run: python scripts/ctf_download_hunt.py
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-download-evidence
+          path: |
+            ctf-download-results.json
+            ctf-download-report.md
