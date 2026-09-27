@@ -12,14 +12,12 @@ services:
         fromDatabase:
           name: h1-bounty-agent-db
           property: connectionString
-
       - key: HACKERONE_USERNAME
         sync: false
       - key: HACKERONE_API_TOKEN
         sync: false
       - key: HACKERONE_BASE_URL
         value: https://api.hackerone.com
-
       - key: DASHBOARD_USER
         sync: false
       - key: DASHBOARD_PASSWORD
@@ -28,7 +26,6 @@ services:
         generateValue: true
       - key: CRON_SECRET
         generateValue: true
-
       - key: DRY_RUN
         value: "true"
       - key: ALLOW_ACTIVE_TESTS
@@ -44,7 +41,7 @@ services:
       - key: ALLOW_STATE_CHANGING_TESTS
         value: "false"
       - key: H1_ENABLE_SUBMISSION
-        value: "true"
+        value: "false"
       - key: REQUESTS_PER_SECOND
         value: "1"
       - key: SESSION_MAP_MAX_PAGES
@@ -55,9 +52,8 @@ services:
         value: "3"
       - key: BROWSER_TRACE_MAX_REQUESTS
         value: "500"
-
       - key: AUTONOMOUS_RESEARCH
-        value: "true"
+        value: "false"
       - key: AUTONOMOUS_PASSIVE_RESEARCH
         value: "false"
       - key: AUTONOMOUS_MAX_PROGRAMS
@@ -100,7 +96,6 @@ services:
         value: "45"
       - key: RESEARCH_PROGRAM_ALLOWLIST
         value: ""
-
       - key: LLM_PROVIDER
         sync: false
       - key: LLM_MODEL
