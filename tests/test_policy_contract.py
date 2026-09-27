@@ -25,7 +25,7 @@ def test_security_research_contract_exists():
     for required in (
         "Program policy",
         "Structured allowlist",
-        "exclusions/instructions",
+        "Exclusions/instructions",
         "CONFIRMED",
         "UNCONFIRMED",
         "duplicate screening",
