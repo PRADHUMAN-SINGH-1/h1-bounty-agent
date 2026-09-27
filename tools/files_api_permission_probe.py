@@ -170,6 +170,9 @@ def main() -> int:
 
     timeout = httpx.Timeout(15.0)
     with httpx.Client(timeout=timeout, follow_redirects=False, headers=headers) as client:
+        if "--test-key-escalation" in sys.argv:
+            return test_key_creation_escalation(client, base, out)
+
         for idx, target in enumerate(TARGETS):
             if idx:
                 time.sleep(1.05)
@@ -213,11 +216,6 @@ def main() -> int:
                         "documentation": target.documentation,
                     }
                 )
-
-    if "--test-key-escalation" in sys.argv:
-        if out["requests"]:
-            time.sleep(1.05)
-        return test_key_creation_escalation(client, base, out)
 
     print(json.dumps(out, indent=2))
     return 0
