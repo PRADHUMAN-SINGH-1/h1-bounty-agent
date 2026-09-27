@@ -95,7 +95,7 @@ services:
       - key: TOOLCHAIN_NUCLEI_TIMEOUT_SECONDS
         value: "45"
       - key: RESEARCH_PROGRAM_ALLOWLIST
-        value: ""
+        value: "files"
       - key: LLM_PROVIDER
         sync: false
       - key: LLM_MODEL
