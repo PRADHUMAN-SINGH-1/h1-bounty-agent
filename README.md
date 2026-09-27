@@ -94,6 +94,8 @@ The September 26, 2026 autonomous HackerOne run authenticated successfully, scan
 
 The current CTF follow-up checks on September 27, 2026 tested the known document ID 1198436185, including the document, download, alternate document paths, and CAPI routes with anonymous GET/HEAD/OPTIONS requests. The download path returned HTTP 403 anonymously and no challenge flag marker was observed, so there is currently no verified CTF finding from this pass.
 
+A separate current-program source-integrity review produced a private submission dossier. Target-specific vulnerability details are intentionally kept out of this public README until responsible disclosure is appropriate.
+
 Authorized cross-account testing now uses an exact-object BOLA workflow: Account A reads an object, the agent extracts the object URL and ownership binding, then Account B requests that exact same object URL. The agent only marks it suspicious when Account B receives HTTP 2xx and reproduces both the object identifier and an A-owned binding on a private-object path. The previous arbitrary `+1`/reversed-ID substitution logic was removed because it could not prove an authorization bypass. Configure two distinct researcher-owned test sessions only in the deployment environment using ALLOW_AUTHZ_TESTS=true, AUTHZ_HEADER_A, and AUTHZ_HEADER_B; never place live session tokens in source control or chat. A deterministic CWE-639 report draft is generated from this high-signal evidence, but it remains `needs_review` and requires human approval before any submission.
 
 ## Research engine
