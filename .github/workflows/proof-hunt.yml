@@ -145,3 +145,33 @@ An external destination supplied by an unauthenticated caller should not be acce
           path: |
             proof-results.json
             verified-report.md
+
+
+  live_nation_safe_probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Probe Ticketmaster bugbountytest with GET only
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://signup.ticketmaster.com/bugbountytest'
+          : > /tmp/live-nation.txt
+          echo '== BASE =='
+          curl -sSikL --max-redirs 5 --connect-timeout 10 --max-time 30 "$base" | tee -a /tmp/live-nation.txt | sed -n '1,100p'
+          echo '== QUERY CANARIES =='
+          for q in             '?next=https%3A%2F%2Fexample.com%2Fcanary'             '?redirect=https%3A%2F%2Fexample.com%2Fcanary'             '?return_to=https%3A%2F%2Fexample.com%2Fcanary'             '?callback=https%3A%2F%2Fexample.com%2Fcanary'; do
+            echo "--- $q"
+            curl -sSikL --max-redirs 5 --connect-timeout 10 --max-time 30 "$base$q" | tee -a /tmp/live-nation.txt | sed -n '1,60p'
+          done
+          echo '== COMMON FILES =='
+          for p in robots.txt sitemap.xml .well-known/security.txt manifest.json; do
+            echo "--- $p"
+            curl -sSikL --max-redirs 3 --connect-timeout 10 --max-time 20 "https://signup.ticketmaster.com/$p" | tee -a /tmp/live-nation.txt | sed -n '1,40p'
+          done
+          echo '== FINDING CHECK =='
+          if grep -Eiq '(^|[[:space:]])location:.*https?://example\.com/canary' /tmp/live-nation.txt; then
+            echo 'FINDING: external redirect to attacker-controlled canary'
+            exit 42
+          fi
+          echo 'NO VERIFIED EXTERNAL REDIRECT'
