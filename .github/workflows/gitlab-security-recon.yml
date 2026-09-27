@@ -1,0 +1,28 @@
+name: GitLab Recent Security Fix Recon
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gitlab-security-recon.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone recent GitLab history
+        run: |
+          git clone --filter=blob:none --no-checkout --depth=250 https://gitlab.com/gitlab-org/gitlab.git gitlab-src
+          cd gitlab-src
+          git log --since="2026-09-20" --date=iso --pretty=format:"%H|%ad|%s"             --grep='security\|authorization\|permission\|SSRF\|XSS\|CSRF\|traversal\|bypass' -i > ../gitlab-security-commits.txt
+          sed -n '1,120p' ../gitlab-security-commits.txt
+      - name: Upload commit index
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitlab-security-commit-index
+          path: gitlab-security-commits.txt
