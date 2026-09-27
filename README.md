@@ -85,6 +85,17 @@ HackerOne's current documentation also exposes program signals such as `offers_b
 
 HackerOne's current guidance emphasizes that scope determines which assets can be reported and whether they are bounty eligible; the agent uses those structured-scope fields as hard routing gates.
 
+
+## Latest targeted hunt modules
+
+The repository also contains targeted, read-only checks for high-signal program surfaces: Superhuman/Grammarly CTF document paths, Superhuman identity/OAuth endpoints, Kong public XSS/Algolia exposure, Kong Identity OAuth, and Kong documentation exposure.
+
+The September 26, 2026 autonomous HackerOne run authenticated successfully, scanned 500 programs during discovery, evaluated 595 programs, identified 9 bounty programs with 16 scope candidates, and selected **Flutteruki** and **Superhuman** for the configured two-program pass. It researched 3 targets and created 0 findings. The research evidence reached report drafting, but evidence triage and LLM analysis were blocked by the configured Hugging Face router returning HTTP 402. No bounty report was submitted from that run.
+
+The current CTF follow-up checks on September 27, 2026 tested the known document ID 1198436185, including the document, download, alternate document paths, and CAPI routes with anonymous GET/HEAD/OPTIONS requests. The download path returned HTTP 403 anonymously and no challenge flag marker was observed, so there is currently no verified CTF finding from this pass.
+
+Authorized cross-account testing remains the highest-value unfinished capability. Configure two researcher-owned test sessions only in the deployment environment using ALLOW_AUTHZ_TESTS=true, AUTHZ_HEADER_A, and AUTHZ_HEADER_B; never place live session tokens in source control or chat.
+
 ## Research engine
 
 Deep research currently includes:
