@@ -19,7 +19,7 @@ _OWNER_RE = re.compile(
     r"""["'](?P<key>(?:owner|user|account|workspace|organization|tenant|project|team)[_-]?(?:id|uuid)?)["']\s*:\s*["']?(?P<value>[A-Za-z0-9._:-]{2,128})["']?""",
     re.I,
 )
-_ABS_URL_RE = re.compile(r"https?://[^\s"'<>\\]+", re.I)
+_ABS_URL_RE = re.compile(r'''https?://[^\s"'<>\\]+''', re.I)
 _REL_URL_RE = re.compile(r"""["'](?P<url>/[^"'<>\s]{3,500})["']""")
 _PRIVATE_PATH_HINTS = (
     "/api/",
