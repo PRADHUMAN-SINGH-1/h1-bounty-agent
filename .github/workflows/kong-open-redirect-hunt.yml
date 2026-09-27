@@ -1,0 +1,24 @@
+name: Kong Open Redirect Hunt
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/kong_open_redirect_hunt.py
+      - .github/workflows/kong-open-redirect-hunt.yml
+permissions:
+  contents: read
+jobs:
+  redirect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test public redirect parameters
+        run: python scripts/kong_open_redirect_hunt.py
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: kong-open-redirect-evidence
+          path: |
+            kong-open-redirect-results.json
+            kong-open-redirect-report.md
