@@ -1,0 +1,52 @@
+name: Amazon VRP Safe Redirect Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/amazon-vrp-redirect.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Probe Amazon.in redirects safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          ua='amazonvrpresearcher_pradyuman1'
+          out=/tmp/amazon-redirect.txt
+          : > "$out"
+
+          targets=(
+            'https://www.amazon.in/gp/redirect.html?location=https%3A%2F%2Fexample.com%2Fcanary'
+            'https://www.amazon.in/gp/redirect.html?url=https%3A%2F%2Fexample.com%2Fcanary'
+            'https://www.amazon.in/gp/redirect.html?ie=UTF8&location=https%3A%2F%2Fexample.com%2Fcanary'
+            'https://www.amazon.in/gp/slredirect/picassoRedirect.html?url=https%3A%2F%2Fexample.com%2Fcanary'
+            'https://www.amazon.in/gp/aw/d.html?url=https%3A%2F%2Fexample.com%2Fcanary'
+            'https://www.amazon.in/gp/your-account/order-history?returnUrl=https%3A%2F%2Fexample.com%2Fcanary'
+            'https://www.amazon.in/ap/signin?openid.return_to=https%3A%2F%2Fexample.com%2Fcanary'
+          )
+
+          for u in "${targets[@]}"; do
+            echo "=== $u ===" | tee -a "$out"
+            curl -sSik --max-redirs 0 --connect-timeout 10 --max-time 25               -A "$ua" "$u" | tee -a "$out" | sed -n '1,50p'
+            sleep 2
+          done
+
+          echo '=== FINDING CHECK ==='
+          awk 'BEGIN{IGNORECASE=1}
+               /^=== / {target=$0}
+               /^location: https?:\/\/example\.com\/canary/ {
+                 print "FINDING:", target, $0
+               }' "$out"
+
+          if grep -Eiq '^location:[[:space:]]*https?://example\.com/canary' "$out"; then
+            echo 'VERIFIED: external redirect to researcher-controlled canary destination'
+            exit 42
+          fi
+          echo 'NO VERIFIED EXTERNAL REDIRECT'
