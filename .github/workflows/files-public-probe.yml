@@ -1,0 +1,151 @@
+name: Files.com Authorized Public Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/files-public-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run GET-only Files.com probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, re, hashlib, pathlib
+          from urllib.parse import urljoin, urlparse
+          import httpx
+
+          targets = [
+              "https://app.files.com/",
+          ]
+          api_paths = [
+              "/api/rest/v1/api_key.json",
+              "/api/rest/v1/permissions.json",
+              "/api/rest/v1/users.json",
+              "/api/rest/v1/custom_domains.json",
+              "/api/rest/v1/bundle_downloads.json",
+              "/api/rest/v1/files.json",
+              "/api/rest/v1/folders.json",
+              "/api/rest/v1/public_keys.json",
+          ]
+          client=httpx.Client(
+              headers={"User-Agent":"H1-Bounty-Agent/0.4 authorized-files-public-probe","Accept":"*/*"},
+              timeout=15.0,
+              follow_redirects=False,
+          )
+
+          secret_patterns = [
+              re.compile(r'AKIA[0-9A-Z]{16}'),
+              re.compile(r'ASIA[0-9A-Z]{16}'),
+              re.compile(r'AIza[0-9A-Za-z_-]{30,}'),
+              re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),
+              re.compile(r'(?i)\b(?:secret|password|passwd|refresh_token|access_token|private_key)\b'),
+          ]
+          rows=[]
+          findings=[]
+
+          def record(method,url,r,body):
+              safe_body=body[:200000]
+              sha=hashlib.sha256(body.encode("utf-8","replace")).hexdigest()
+              matches=[]
+              for p in secret_patterns:
+                  if p.pattern.lower().startswith("(?i)\\b"):
+                      if p.search(safe_body):
+                          matches.append("sensitive-field-name")
+                  else:
+                      if p.search(safe_body):
+                          matches.append(p.pattern[:32])
+              row={
+                  "method":method,
+                  "url":url,
+                  "status":r.status_code,
+                  "content_type":r.headers.get("content-type",""),
+                  "length":len(body),
+                  "body_sha256":sha,
+                  "location":r.headers.get("location",""),
+                  "secret_pattern_classes":sorted(set(matches)),
+              }
+              rows.append(row)
+              if r.status_code in (200,206) and matches:
+                  findings.append({
+                      "type":"credential_like_exposure",
+                      "url":url,
+                      "status":r.status_code,
+                      "length":len(body),
+                      "pattern_classes":sorted(set(matches)),
+                      "body_sha256":sha,
+                  })
+              return row
+
+          for base in targets:
+              r=client.get(base)
+              row=record("GET",base,r,r.text)
+              print(json.dumps(row,ensure_ascii=False))
+
+              html=r.text[:1000000]
+              links=[]
+              for raw in re.findall(r'(?:href|src)=[\"\']([^\"\']+)',html,re.I):
+                  u=urljoin(base,raw)
+                  pu=urlparse(u)
+                  pb=urlparse(base)
+                  if pu.scheme in {"http","https"} and (pu.hostname or "").lower()==(pb.hostname or "").lower():
+                      if u not in links:
+                          links.append(u)
+
+              for u in links[:20]:
+                  try:
+                      rr=client.get(u)
+                      row=record("GET",u,rr,rr.text)
+                      print(json.dumps(row,ensure_ascii=False))
+                  except Exception as exc:
+                      print(json.dumps({"url":u,"error":str(exc)},ensure_ascii=False))
+
+              for p in api_paths:
+                  u=base.rstrip("/") + p
+                  try:
+                      rr=client.get(u)
+                      row=record("GET",u,rr,rr.text)
+                      print(json.dumps(row,ensure_ascii=False))
+                      if rr.status_code in (200,206) and rr.text.strip() and rr.headers.get("content-type","").lower().startswith("application/json"):
+                          print(json.dumps({
+                              "api_candidate":u,
+                              "status":rr.status_code,
+                              "body_sha256":hashlib.sha256(rr.text.encode("utf-8","replace")).hexdigest(),
+                              "body_prefix_redacted":re.sub(r'(["\'](?:key|token|password|secret|access_token|refresh_token)["\']\s*:\s*)["\'][^\"\']*["\']',r'\\1"REDACTED"',rr.text[:4000],flags=re.I),
+                          },ensure_ascii=False))
+                  except Exception as exc:
+                      print(json.dumps({"url":u,"error":str(exc)},ensure_ascii=False))
+
+          out={"targets":targets,"rows":rows,"findings":findings}
+          pathlib.Path("files-public-probe.json").write_text(json.dumps(out,indent=2),encoding="utf-8")
+          report=pathlib.Path("files-public-probe.md")
+          if findings:
+              report.write_text(
+                  "# Potential Files.com exposure candidate\n\n"
+                  "The GET-only probe observed a credential-like pattern in a 2xx in-scope response. "
+                  "The artifact stores hashes and pattern classes rather than secret material. "
+                  "Manual reproduction and current program-policy validation are still required before submission.\n\n"
+                  + json.dumps(findings,indent=2)
+              )
+          else:
+              report.write_text("# NO VERIFIED BOUNTY FINDING\n\nThe GET-only public probe did not produce a confirmed vulnerability.\n")
+
+          client.close()
+          PY
+
+      - name: Upload probe evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-public-probe-evidence
+          path: |
+            files-public-probe.json
+            files-public-probe.md
