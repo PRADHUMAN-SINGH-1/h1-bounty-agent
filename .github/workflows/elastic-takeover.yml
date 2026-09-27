@@ -57,14 +57,14 @@ jobs:
 
               target=cn[-1]
               if host=="eden.elastic.co" and "s3-website.us-east-2.amazonaws.com" in target:
-                  for proto in ["http","https"]:
+                  ips=["3.5.131.24","3.5.88.89","3.5.89.88"]
+                  for ip in ips:
                       try:
-                          req=urllib.request.Request(proto+"://"+target+"/",headers={"User-Agent":"elastic-vrp-researcher"},method="GET")
-                          with urllib.request.urlopen(req,timeout=12) as rr:
-                              b=rr.read(4096).decode("utf-8","replace")
-                              print("PROVIDER_CHECK",proto,target,"STATUS",rr.status,"BODY",repr(b[:1200]))
+                          import subprocess
+                          out=subprocess.check_output(["curl","-sS","-i","--max-time","12","--resolve",target+":80:"+ip,"http://"+target+"/"],text=True,stderr=subprocess.STDOUT)
+                          print("PROVIDER_IP_CHECK",ip,"BODY",repr(out[:4000]))
                       except Exception as e:
-                          print("PROVIDER_ERROR",proto,target,repr(e))
+                          print("PROVIDER_IP_ERROR",ip,repr(e))
               try:
                   import urllib.request
                   req=urllib.request.Request("https://"+host+"/",headers={"User-Agent":"elastic-vrp-researcher"},method="GET")
