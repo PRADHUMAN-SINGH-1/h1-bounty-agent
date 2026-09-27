@@ -66,11 +66,18 @@ jobs:
           set -euo pipefail
           response=$(curl --fail-with-body --silent --show-error --max-time 30 -H "Authorization: Bearer $CRON_SECRET" "$H1_AGENT_URL/api/cron")
           echo "$response"
+          status=$(python -c 'import json,sys; print(json.loads(sys.stdin.read()).get("status","unknown"))' <<<"$response")
+          if [ "$status" = "idle" ]; then
+            echo "No autonomous hunt was queued by the deployed service. This is expected when AUTONOMOUS_RESEARCH=false and no queued research job exists."
+            printf "%s\n" "idle" > /tmp/hunt-result
+            exit 0
+          fi
           job_id=$(python -c 'import json,sys; p=json.loads(sys.stdin.read()); print(p.get("job_id") or p.get("id") or "")' <<<"$response")
           test -n "$job_id"
           printf '%s' "$job_id" > /tmp/research-job-id
 
       - name: Wait until full report exists
+        if: ${{ hashFiles('/tmp/research-job-id') != '' }}
         run: |
           set -u
           job_id=$(cat /tmp/research-job-id)
@@ -110,6 +117,7 @@ jobs:
           case "$result" in
             payable) state="success"; description="Complete evidence-backed payable HackerOne report generated" ;;
             none) state="failure"; description="No complete evidence-backed HackerOne report generated" ;;
+            idle) state="success"; description="No autonomous hunt queued; deployment keeps AUTONOMOUS_RESEARCH disabled" ;;
             timeout) state="error"; description="Ten-minute report-generation window expired" ;;
             *) state="error"; description="Hunt ended without a definitive report result" ;;
           esac
