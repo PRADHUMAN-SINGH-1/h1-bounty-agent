@@ -77,8 +77,103 @@ def _maybe_auto_submit(settings,api,store,finding_id,handle,target,title,severit
     store.mark_submitted(finding_id,payload); return {"status":"submitted","report_id":str(payload.get("data",{}).get("id") or "")}
 
 
+
+def _idor_rule_based_candidate(handle: str, target: str, asset, evidence: list[Evidence], program_context: dict) -> dict | None:
+    """Create a candidate only when the exact A-owned object is readable by distinct account B."""
+    suspicious = next((item for item in evidence if item.name == "idor_suspicious" and item.value.lower() == "true"), None)
+    same_object = next((item for item in evidence if item.name == "idor_same_object_access" and item.value.lower() == "true"), None)
+    ownership = next((item for item in evidence if item.name == "idor_ownership_binding" and item.value.lower() == "true"), None)
+    candidate_url = next((item for item in evidence if item.name == "idor_candidate_url"), None)
+    object_id = next((item for item in evidence if item.name == "idor_object_id"), None)
+    status_a = next((item for item in evidence if item.name == "idor_status_a"), None)
+    status_b = next((item for item in evidence if item.name == "idor_status_b"), None)
+    owner_a = next((item for item in evidence if item.name == "idor_owner_binding_a"), None)
+    owner_b = next((item for item in evidence if item.name == "idor_owner_binding_b"), None)
+    if not all((suspicious, same_object, ownership, candidate_url, object_id, status_a, status_b, owner_a, owner_b)):
+        return None
+    duplicate_screen = (program_context or {}).get("duplicate_screening") or {}
+    if duplicate_screen.get("status") != "checked":
+        return None
+    candidate = candidate_url.value
+    target_host = (urlparse(candidate).hostname or urlparse(target).hostname or "").lower()
+    for report in duplicate_screen.get("disclosed_reports") or []:
+        report_url = str(report.get("url") or "").lower()
+        if report_url and report_url == candidate.lower():
+            return None
+
+    evidence_subset = [
+        item for item in evidence
+        if item.name in {
+            "idor_original_url",
+            "idor_candidate_url",
+            "idor_status_a",
+            "idor_status_b",
+            "idor_object_id",
+            "idor_owner_binding_a",
+            "idor_owner_binding_b",
+            "idor_fingerprint_a",
+            "idor_fingerprint_b",
+            "idor_same_object_access",
+            "idor_ownership_binding",
+            "idor_suspicious",
+            "idor_observation",
+        }
+    ]
+    title = f"Broken object-level authorization exposes an A-owned object to Account B on {target_host}"
+    summary = (
+        f"Two distinct authorized test-account sessions were used against {candidate}. "
+        f"Account A received HTTP {status_a.value} for object {object_id.value}, and the same exact object URL "
+        f"returned HTTP {status_b.value} to Account B. The response for Account B reproduced the Account A "
+        f"ownership binding ({owner_b.value}), demonstrating cross-account access to the same ownership-bound object."
+    )
+    impact = (
+        "A user controlling Account B can read an object belonging to Account A without the application's "
+        "authorization layer enforcing the object's ownership boundary. This can expose private object data "
+        "across tenants/accounts; the exact data sensitivity and downstream impact should be confirmed during human review."
+    )
+    reproduction = [
+        f"Use two separate, researcher-owned test accounts, A and B, with no intentional sharing relationship for object {object_id.value}.",
+        f"Authenticate as Account A and request {candidate}. Record the successful HTTP {status_a.value} response and the ownership binding {owner_a.value}.",
+        f"Authenticate as Account B and request the exact same URL {candidate}; do not change the object identifier.",
+        f"Observe HTTP {status_b.value} and verify that the response still contains object {object_id.value} and the Account A ownership binding.",
+        "Confirm that Account B is not intentionally granted access to the object, then retain the two responses as evidence."
+    ]
+    metadata = {
+        "asset_type": asset.asset_type,
+        "asset_identifier": asset.asset_identifier,
+        "scope_reference": asset.reference or "",
+        "scope_max_severity": asset.max_severity or "",
+        "affected_component": f"Object authorization for {candidate}",
+        "preconditions": "Two distinct researcher-owned test accounts are available; Account A owns the object and Account B has no intentional sharing/collaboration permission for it.",
+        "observed_behavior": f"Account A returned HTTP {status_a.value}; the exact same object URL returned HTTP {status_b.value} to Account B and reproduced {owner_b.value}.",
+        "expected_behavior": "The server should enforce object ownership or explicit sharing permissions and deny Account B access to Account A's private object.",
+        "attack_scenario": f"An attacker with a normal authenticated Account B requests the known object URL {candidate} and receives the A-owned object instead of an authorization error.",
+        "remediation": "Enforce server-side authorization on every object lookup. Bind the requested object to the authenticated principal/tenant and reject access unless ownership or an explicit sharing relationship is authorized.",
+        "references": [candidate],
+        "weakness_name": "Authorization Bypass Through User-Controlled Key (CWE-639)",
+        "weakness_id": 639,
+        "cvss_score": 6.5,
+        "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+        "missing_validation": [],
+    }
+    return {
+        "status": "candidate",
+        "title": title,
+        "summary": summary,
+        "impact": impact,
+        "reproduction": reproduction,
+        "severity": "medium",
+        "confidence": 0.96,
+        "weakness_id": 639,
+        "metadata": metadata,
+        "evidence": evidence_subset,
+    }
+
 def _rule_based_candidate(handle: str, target: str, asset, evidence: list[Evidence], program_context: dict) -> dict | None:
     """Create a complete candidate only from a directly demonstrated, high-signal probe."""
+    idor_candidate = _idor_rule_based_candidate(handle, target, asset, evidence, program_context)
+    if idor_candidate is not None:
+        return idor_candidate
     redirect_obs = [item for item in evidence if item.name == "open_redirect_observation"]
     if not redirect_obs:
         return None
