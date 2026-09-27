@@ -1,0 +1,31 @@
+name: GitLab Label Permission Diff
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gitlab-label-permission-diff.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect exact files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --no-checkout --depth=50 https://gitlab.com/gitlab-org/gitlab.git gitlab-src
+          cd gitlab-src
+          git fetch --depth=1 origin 8ac38618a6d22975a6711e897d4f265f4e108a88
+          echo '=== FILES ==='
+          git diff-tree --no-commit-id --name-status -r 8ac38618a6d22975a6711e897d4f265f4e108a88 | grep -Ei 'label|permission' | head -80
+          echo '=== PATCH FILES ==='
+          for f in $(git diff-tree --no-commit-id --name-only -r 8ac38618a6d22975a6711e897d4f265f4e108a88 | grep -Ei 'label|permission' | head -20); do
+            echo "### $f"
+            git show 8ac38618a6d22975a6711e897d4f265f4e108a88 -- "$f" | sed -n '1,260p'
+          done
