@@ -1,0 +1,91 @@
+name: Next.js Turbopack Trace Regression
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/nextjs-trace-regression.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Next.js 16.3.6
+        uses: actions/checkout@v4
+        with:
+          repository: vercel/next.js
+          ref: v16.3.6
+
+      - name: Inject minimal package-root tracing fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='turbopack/crates/turbopack-tracing/tests/node-file-trace/test/unit/h1-package-root-directory'
+          mkdir -p "$root/node_modules/some-pkg"
+          cat > "$root/input.js" <<'EOF'
+          require('some-pkg')
+          EOF
+          cat > "$root/node_modules/some-pkg/index.js" <<'EOF'
+          const path = require('path')
+          function resolve(dir) {
+            return path.resolve(dir || '.')
+          }
+          resolve(process.env.H1_ADDON_DIR)
+          EOF
+          cat > "$root/node_modules/some-pkg/package.json" <<'EOF'
+          {"name":"some-pkg","version":"1.0.0","main":"index.js"}
+          EOF
+          cat > "$root/node_modules/some-pkg/local-asset.txt" <<'EOF'
+          package-local-asset
+          EOF
+          cat > "$root/application-private.txt" <<'EOF'
+          H1_SYNTHETIC_SECRET_DO_NOT_TRACE
+          EOF
+          cat > "$root/output.js" <<'EOF'
+          ;[
+            'package.json',
+            'test/unit/h1-package-root-directory/input.js',
+            'test/unit/h1-package-root-directory/node_modules/some-pkg/index.js',
+            'test/unit/h1-package-root-directory/node_modules/some-pkg/local-asset.txt',
+            'test/unit/h1-package-root-directory/node_modules/some-pkg/package.json',
+          ]
+          EOF
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('turbopack/crates/turbopack-tracing/tests/unit.rs')
+          s=p.read_text()
+          needle='#[case::pkg_project_root_directory("pkg-project-root-directory")]'
+          if needle in s:
+              s=s.replace(needle, needle+'\n#[case::h1_package_root_directory("h1-package-root-directory")]')
+          else:
+              marker='#[case::process_cwd("process-cwd")]'
+              s=s.replace(marker, '#[case::h1_package_root_directory("h1-package-root-directory")]\n'+marker)
+          p.write_text(s)
+          PY
+          echo '=== fixture ==='
+          find "$root" -maxdepth 4 -type f -print -exec sed -n '1,20p' {} \;
+
+      - name: Run regression against released Next.js 16.3.6
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test -p turbopack-tracing --test unit h1_package_root_directory -- --nocapture
+
+      - name: Explicitly check for synthetic secret in trace output
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='turbopack/crates/turbopack-tracing/tests/node-file-trace/test/unit/h1-package-root-directory'
+          echo '=== reference ==='
+          cat "$root/output.js"
+          echo '=== source control check ==='
+          if grep -R "H1_SYNTHETIC_SECRET_DO_NOT_TRACE" "$root/node_modules"; then
+            echo 'Unexpected secret inside dependency fixture'
+            exit 1
+          fi
+          echo 'The application-owned synthetic secret exists only at the project-root fixture path.'
+          echo 'If the previous test fails by adding this file to the traced set, that is the reproducible release regression.'
