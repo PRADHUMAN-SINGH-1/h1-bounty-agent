@@ -1,0 +1,64 @@
+name: Amazon VRP Focused Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/amazon-vrp-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install browser
+        run: |
+          npm install -g agent-browser
+          agent-browser install
+
+      - name: Focused Amazon public XSS and redirect checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ua='amazonvrpresearcher_pradyuman1'
+          payload='H1CANARY_8f21c9'
+          mkdir -p amazon-probe
+          : > amazon-probe/results.txt
+
+          urls=(
+            "https://www.amazon.in/s?k=${payload}"
+            "https://www.amazon.in/s?field-keywords=${payload}"
+            "https://www.amazon.in/gp/redirect.html?location=https%3A%2F%2Fexample.com%2Fcanary"
+            "https://www.amazon.in/gp/redirect.html?location=https%3A%2F%2Fexample.com%2Fcanary%26x%3D1"
+            "https://www.amazon.in/exec/obidos/external-search/?field-keywords=${payload}"
+          )
+
+          for url in "${urls[@]}"; do
+            echo "=== $url ===" | tee -a amazon-probe/results.txt
+            curl -sSik --max-redirs 0 --connect-timeout 10 --max-time 25               -A "$ua" "$url" | tee -a amazon-probe/results.txt | sed -n '1,70p'
+            sleep 1
+          done
+
+          echo '=== reflection check ==='
+          if grep -Fq "$payload" amazon-probe/results.txt; then
+            echo "REFLECTION_FOUND"
+          else
+            echo "NO_REFLECTION"
+          fi
+
+          echo '=== external redirect check ==='
+          if grep -Eiq '(^|[[:space:]])location:[[:space:]]*https?://example\.com/canary' amazon-probe/results.txt; then
+            echo "EXTERNAL_REDIRECT_FOUND"
+          else
+            echo "NO_EXTERNAL_REDIRECT"
+          fi
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: amazon-vrp-probe-results
+          path: amazon-probe/results.txt
