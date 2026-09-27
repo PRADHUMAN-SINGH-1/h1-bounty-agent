@@ -1,0 +1,96 @@
+name: Elastic Subdomain Takeover Discovery
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/elastic-takeover.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enumerate Elastic certificates and inspect DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p elastic-takeover
+          python - <<'PY'
+          import json, re, subprocess, urllib.request
+          from pathlib import Path
+
+          data=urllib.request.urlopen("https://crt.sh/?q=%25.elastic.co&output=json", timeout=30).read()
+          certs=json.loads(data)
+          names=set()
+          for c in certs:
+              for n in c.get("name_value","").splitlines():
+                  n=n.strip().lower().lstrip("*.")
+                  if n.endswith(".elastic.co") and "*" not in n and n.count(".")>=2:
+                      names.add(n)
+
+          Path("elastic-takeover/candidates.txt").write_text("\n".join(sorted(names))+"\n")
+          print("CERT_NAMES",len(names))
+
+          findings=[]
+          for host in sorted(names):
+              try:
+                  out=subprocess.check_output(
+                      ["dig","+short",host,"CNAME"], text=True, stderr=subprocess.DEVNULL, timeout=5
+                  ).strip().splitlines()
+                  cn=[x.rstrip(".") for x in out if x.strip()]
+                  a=subprocess.check_output(
+                      ["dig","+short",host,"A"], text=True, stderr=subprocess.DEVNULL, timeout=5
+                  ).strip().splitlines()
+              except Exception:
+                  continue
+
+              if not cn:
+                  continue
+
+              target=cn[-1]
+              try:
+                  import urllib.request
+                  req=urllib.request.Request("https://"+host+"/",headers={"User-Agent":"elastic-vrp-researcher"},method="GET")
+                  with urllib.request.urlopen(req,timeout=8) as r:
+                      body=r.read(4096).decode("utf-8","replace")
+                      status=r.status
+              except Exception as e:
+                  status=repr(e)
+                  body=""
+
+              print("CANDIDATE",host,"CNAME",target,"A",a,"STATUS",status)
+              low=body.lower()
+              sigs=[
+                  "no such app",
+                  "no such site",
+                  "there isn't a github pages site here",
+                  "project not found",
+                  "repository not found",
+                  "no such bucket",
+                  "the specified bucket does not exist",
+                  "nosuchbucket",
+                  "not found - request id",
+                  "heroku | no such app",
+                  "unrecognized host"
+              ]
+              matched=[s for s in sigs if s in low]
+              if matched:
+                  findings.append({"host":host,"cname":target,"a":a,"status":status,"signatures":matched})
+
+          Path("elastic-takeover/suspects.json").write_text(json.dumps(findings,indent=2))
+          print("SUSPECT_COUNT",len(findings))
+          for x in findings:
+              print("SUSPECT",json.dumps(x,separators=(",",":")))
+          PY
+
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: elastic-subdomain-takeover-discovery
+          path: elastic-takeover/
