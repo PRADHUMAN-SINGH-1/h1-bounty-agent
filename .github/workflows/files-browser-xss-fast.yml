@@ -60,3 +60,22 @@ jobs:
         with:
           name: files-browser-fast-evidence
           path: browser-fast
+
+      - name: Live Nation bugbountytest safe GET probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://signup.ticketmaster.com/bugbountytest'
+          out='browser-fast/live-nation.txt'
+          : > "$out"
+          curl -sSikL --max-redirs 5 --connect-timeout 10 --max-time 30 "$base" | tee "$out" | sed -n '1,100p'
+          for suffix in             '?next=https%3A%2F%2Fexample.com%2Fcanary'             '?redirect=https%3A%2F%2Fexample.com%2Fcanary'             '?return_to=https%3A%2F%2Fexample.com%2Fcanary'             '?callback=https%3A%2F%2Fexample.com%2Fcanary'; do
+            echo "--- $suffix" | tee -a "$out"
+            curl -sSikL --max-redirs 5 --connect-timeout 10 --max-time 30 "$base$suffix" | tee -a "$out" | sed -n '1,50p'
+          done
+          echo '=== redirect finding check ==='
+          if grep -Eiq '(^|[[:space:]])location:.*https?://example\.com/canary' "$out"; then
+            echo 'FINDING: unauthenticated external redirect'
+            exit 42
+          fi
+          echo 'NO VERIFIED LIVE NATION REDIRECT'
