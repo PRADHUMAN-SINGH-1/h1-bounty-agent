@@ -1,0 +1,74 @@
+name: GitLab Public Redirect Hunt
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/gitlab-public-redirect.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover and test GitLab redirect parameters
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re, requests
+          from urllib.parse import urljoin, urlparse, parse_qsl, urlencode, urlunparse
+          s=requests.Session()
+          s.headers.update({"User-Agent":"gitlab-bbp-researcher","Accept":"text/html,application/xhtml+xml"})
+          pages=[
+            "https://gitlab.com/",
+            "https://gitlab.com/users/sign_in",
+            "https://gitlab.com/users/sign_up",
+            "https://gitlab.com/explore",
+            "https://gitlab.com/public",
+            "https://gitlab.com/help",
+            "https://gitlab.com/dashboard"
+          ]
+          params=set()
+          urls=set()
+          for page in pages:
+            try:
+              r=s.get(page,timeout=15,allow_redirects=False)
+              print("PAGE",page,"STATUS",r.status_code,"LOCATION",r.headers.get("Location"))
+              for m in re.finditer(r'href=["\']([^"\']+)["\']',r.text,re.I):
+                u=urljoin(page,m.group(1))
+                p=urlparse(u)
+                if p.hostname=="gitlab.com":
+                  for k,v in parse_qsl(p.query,keep_blank_values=True):
+                    if k.lower() in {"redirect","redirect_to","return_to","return","next","continue","url","target","destination","redirect_uri","return_uri"}:
+                      params.add(k); urls.add(u)
+            except Exception as e: print("ERROR_PAGE",page,repr(e))
+          base=[
+            "https://gitlab.com/users/sign_in",
+            "https://gitlab.com/users/sign_up",
+            "https://gitlab.com/explore",
+            "https://gitlab.com/public"
+          ]
+          for u in sorted(urls|set(base)):
+            p=urlparse(u)
+            existing=parse_qsl(p.query,keep_blank_values=True)
+            keys={k for k,v in existing}
+            candidates=sorted(params|keys)
+            for k in candidates:
+              q=dict(existing); q[k]="https://example.com/glb-canary"
+              test=urlunparse((p.scheme,p.netloc,p.path,p.params,urlencode(q),p.fragment))
+              try:
+                rr=s.get(test,timeout=12,allow_redirects=False)
+                loc=rr.headers.get("Location","")
+                print("TEST",test,"STATUS",rr.status_code,"LOCATION",loc)
+                if loc.startswith("https://example.com/glb-canary"):
+                  print("VERIFIED_EXTERNAL_REDIRECT",test)
+              except Exception as e: print("ERROR_TEST",test,repr(e))
+              break
+          print("DISCOVERED_PARAMS",sorted(params))
+          print("DISCOVERED_URLS",len(urls))
+          PY
