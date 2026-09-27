@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import Finding
+from .research_gates import CONFIRMED, UNCONFIRMED
 
 
 def _bullet(value: object) -> str:
@@ -10,15 +11,21 @@ def _bullet(value: object) -> str:
     return f"- {text}" if text else ""
 
 
+def _research_status(metadata: dict) -> str:
+    gate = metadata.get("reproduction_gate") or {}
+    if isinstance(gate, dict) and str(gate.get("status") or "").upper() == CONFIRMED:
+        return CONFIRMED
+    return UNCONFIRMED
+
+
 def markdown_report(finding: Finding) -> str:
     metadata = finding.metadata or {}
+    status = _research_status(metadata)
     evidence = '\n'.join(
         f"- **{e.name}**: {e.value}  \n  Source: {e.source}  \n  Observed: {e.timestamp}"
         for e in finding.evidence
     )
-    reproduction = '\n'.join(
-        f"{i+1}. {step}" for i, step in enumerate(finding.reproduction)
-    )
+    reproduction = '\n'.join(f"{i+1}. {step}" for i, step in enumerate(finding.reproduction))
 
     references = metadata.get('references') or []
     if isinstance(references, str):
@@ -30,7 +37,13 @@ def markdown_report(finding: Finding) -> str:
         validation_notes = [validation_notes]
     validation_text = '\n'.join(_bullet(item) for item in validation_notes if str(item).strip()) or '- None'
 
+    if status != CONFIRMED:
+        validation_text = (validation_text + '\n- Finding is UNCONFIRMED until all reproduction, boundary, impact, repeatability, scope, and duplicate gates pass.').strip()
+
     return f"""# {finding.title[:149]}
+
+## STATUS
+{status}
 
 ## Summary
 {finding.summary}
@@ -89,6 +102,5 @@ def markdown_report(finding: Finding) -> str:
 - Confirmed severity and weakness classification.
 - Confirmed that reproduction is accurate and non-destructive.
 
-This report is an evidence-grounded candidate. Human validation is required before submission.
+Only a CONFIRMED finding may be submitted. Human approval remains required before HackerOne submission.
 """
-    
