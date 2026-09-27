@@ -75,7 +75,8 @@ jobs:
               candidates.append((score,handle,a,scopes))
           candidates.sort(key=lambda x:(-x[0],x[1]))
 
-          selected=candidates[:12]
+          preferred=[row for row in candidates if row[1]=="files"]
+          selected=(preferred[:1] + [row for row in candidates if row[1]!="files"])[:12]
           rows=[]
           findings=[]
 
