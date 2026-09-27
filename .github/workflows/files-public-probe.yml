@@ -100,6 +100,30 @@ jobs:
                   })
               return row
 
+          forwarded_tests = [
+              ("X-Forwarded-Host", "evil.example"),
+              ("X-Host", "evil.example"),
+              ("Forwarded", "host=evil.example;proto=https"),
+              ("X-Forwarded-Proto", "https"),
+              ("X-Forwarded-Port", "443"),
+          ]
+          forwarded_paths = ["/login","/login_from_oauth","/"]
+          for base in targets:
+              for p in forwarded_paths:
+                  u=base.rstrip("/") + p
+                  for hdr,val in forwarded_tests:
+                      try:
+                          rr=client.get(u,headers={hdr:val})
+                          loc=rr.headers.get("location","")
+                          row=record("GET",u,rr,rr.text)
+                          row["header_test"]={hdr:val}
+                          row["redirect_location"]=loc
+                          print(json.dumps(row,ensure_ascii=False))
+                          if loc and ("evil.example" in loc or loc.startswith("http://evil") or loc.startswith("https://evil")):
+                              findings.append({"type":"host_header_redirect_candidate","url":u,"header":hdr,"value":val,"status":rr.status_code,"location":loc,"body_sha256":row["body_sha256"]})
+                      except Exception as exc:
+                          print(json.dumps({"url":u,"header":hdr,"error":str(exc)},ensure_ascii=False))
+
           for base in targets:
               r=client.get(base)
               row=record("GET",base,r,r.text)
