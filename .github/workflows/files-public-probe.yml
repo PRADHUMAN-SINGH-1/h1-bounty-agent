@@ -108,6 +108,10 @@ jobs:
                       rr=client.get(u)
                       row=record("GET",u,rr,rr.text)
                       print(json.dumps(row,ensure_ascii=False))
+                      if "javascript" in rr.headers.get("content-type","").lower():
+                          api_refs=sorted(set(re.findall(r"(?<![A-Za-z0-9_])(/api/rest/v1/[A-Za-z0-9_./{}-]+)",rr.text)))
+                          for ref in api_refs[:100]:
+                              print(json.dumps({"js_api_reference":ref,"source_sha256":hashlib.sha256(rr.text.encode("utf-8","replace")).hexdigest()},ensure_ascii=False))
                   except Exception as exc:
                       print(json.dumps({"url":u,"error":str(exc)},ensure_ascii=False))
 
