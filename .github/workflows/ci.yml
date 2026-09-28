@@ -471,3 +471,26 @@ jobs:
           path: |
             superhuman-service-mesh.json
             superhuman-service-mesh-report.md
+
+  files_api_live_probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe protected Files.com API endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://app.files.com"
+          for endpoint in users permissions api_keys custom_domains workspaces event_targets history sso_events sftp_host_keys user_lifecycle_rules remote_servers public_keys; do
+            code=$(curl -sS --max-redirs 0 --connect-timeout 8 --max-time 12 -o /tmp/body -w "%{http_code}" "$base/api/rest/v1/$endpoint.json" || true)
+            bytes=$(wc -c < /tmp/body 2>/dev/null || printf "0")
+            sha=$(sha256sum /tmp/body 2>/dev/null | cut -d' ' -f1 || true)
+            printf "FILES_API endpoint=%s status=%s bytes=%s sha256=%s\n" "$endpoint" "$code" "$bytes" "$sha"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+              echo "FILES_API_CANDIDATE endpoint=$endpoint"
+              head -c 2000 /tmp/body || true
+              exit 42
+            fi
+            sleep 1
+          done
+          echo "NO_FILES_API_AUTHORIZATION_BYPASS"
