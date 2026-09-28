@@ -1,0 +1,96 @@
+name: Files.com Trial REST Exposure Sweep
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-trial-rest-sweep.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sweep trial-site REST resources without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="https://bugbountytrialcompany1219.files.com/api/rest/v1"
+          resources=(
+            users permissions api_keys custom_domains workspaces event_targets history sso_events
+            sftp_host_keys user_lifecycle_rules remote_servers public_keys partner_site_requests
+            inbox_recipients scim_logs user_sftp_client_uses settings_changes apps inbox_uploads
+            payments invoices email_logs secrets requests share_groups group_users holiday_calendars
+            chat_sessions snapshots bundle_recipients restores inbox_registrations user_cipher_uses
+            styles event_channels form_field_sets external_events dns_records behaviors groups gpg_keys
+            sync_runs partners clickwraps as2_partners as2_stations key_lifecycle_rules
+            site_subdomain_redirects ai_tasks user_additional_email_recipients file_migrations
+            bundle_downloads bundle_notifications expectation_incidents user_security_events
+            pending_work_events metadata_categories bandwidth_snapshots usage_snapshots
+            public_hosting_request_logs inbound_s3_logs outbound_connection_logs api_request_logs
+            automation_logs file_migration_logs ftp_action_logs sftp_action_logs web_dav_action_logs
+          )
+
+          : > trial-rest-sweep.jsonl
+          candidate=0
+
+          for resource in "${resources[@]}"; do
+            url="$base/$resource.json"
+            curl -sS --max-redirs 0 --connect-timeout 6 --max-time 12               -A "H1-Bounty-Agent/FilesCom-TrialSweep/1.0"               -H "Accept: application/json"               -D /tmp/trial-h -o /tmp/trial-b               -w "%{http_code} %{size_download}\n" "$url" > /tmp/trial-s || true
+
+            read -r code bytes < /tmp/trial-s || true
+            bytes=${bytes:-0}
+            sha=$(sha256sum /tmp/trial-b 2>/dev/null | cut -d" " -f1 || true)
+            ctype=$(awk 'BEGIN{IGNORECASE=1} /^content-type:/ {sub(/^content-type:[[:space:]]*/,""); print; exit}' /tmp/trial-h 2>/dev/null || true)
+
+            json=false
+            records=""
+            if python3 - <<'PY' >/dev/null 2>&1
+import json
+json.load(open("/tmp/trial-b"))
+PY
+            then
+              json=true
+              records=$(python3 - <<'PY'
+import json
+x=json.load(open("/tmp/trial-b"))
+print(len(x) if isinstance(x,list) else "")
+PY
+)
+            fi
+
+            printf '{"resource":"%s","status":%s,"bytes":%s,"content_type":%s,"json":%s,"record_count":%s,"sha256":%s}\n'               "$resource" "$code" "$bytes"               "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$ctype")"               "$json"               "${records:-null}"               "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$sha")"               | tee -a trial-rest-sweep.jsonl
+
+            # Only treat non-empty 2xx JSON from resources that should require auth as candidate.
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ] && [ "$json" = true ]; then
+              case "$resource" in
+                apps) ;;
+                *) candidate=1; echo "TRIAL_REST_CANDIDATE=$resource"; head -c 1500 /tmp/trial-b || true; echo; break ;;
+              esac
+            fi
+
+            rm -f /tmp/trial-h /tmp/trial-b /tmp/trial-s
+            sleep 0.6
+          done
+
+          if [ "$candidate" -eq 1 ]; then
+            echo "candidate=true" > trial-rest-summary.txt
+            exit 42
+          fi
+
+          echo "candidate=false" > trial-rest-summary.txt
+          echo "NO_TRIAL_REST_ANONYMOUS_EXPOSURE"
+
+      - name: Upload trial REST evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-trial-rest-sweep
+          path: |
+            trial-rest-sweep.jsonl
+            trial-rest-summary.txt
