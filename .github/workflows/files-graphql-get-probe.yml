@@ -1,0 +1,40 @@
+name: Files.com GraphQL GET Authorization Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-graphql-get-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe GraphQL GET transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://app.files.com/graphql"
+          queries=(
+            'query={__typename}'
+            'query={__schema{queryType{name}}}'
+            'query=query%20%7B%20__typename%20%7D'
+          )
+          for q in "${queries[@]}"; do
+            code=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 15               -A "H1-Bounty-Agent/FilesCom-GraphQLGET/1.0"               -H "Accept: application/json"               -o /tmp/gql-get-body -w "%{http_code}"               "$base?$q" || true)
+            bytes=$(wc -c < /tmp/gql-get-body 2>/dev/null || printf "0")
+            sha=$(sha256sum /tmp/gql-get-body 2>/dev/null | cut -d' ' -f1 || true)
+            echo "GQL_GET_STATUS=$code GQL_GET_BYTES=$bytes GQL_GET_SHA256=$sha QUERY=$q"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+              head -c 2000 /tmp/gql-get-body || true
+              echo
+            fi
+            rm -f /tmp/gql-get-body
+            sleep 1
+          done
+          echo "GQL_GET_PROBE_COMPLETE"
