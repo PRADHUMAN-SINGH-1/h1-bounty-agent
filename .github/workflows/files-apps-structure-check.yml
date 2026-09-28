@@ -1,0 +1,32 @@
+name: Files.com Apps Response Structure Check
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-apps-structure-check.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Inspect public Apps endpoint structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --max-time 15 "https://app.files.com/api/rest/v1/apps.json" -o /tmp/apps.json
+          python3 - <<'PY'
+          import json,re
+          data=json.load(open("/tmp/apps.json"))
+          rows=data if isinstance(data,list) else (data.get("data") or data.get("apps") or [])
+          print("HTTP_2XX_NONEMPTY=YES")
+          print("RECORD_COUNT=",len(rows) if isinstance(rows,list) else "unknown")
+          if isinstance(rows,list) and rows:
+              for i,row in enumerate(rows[:3]):
+                  if isinstance(row,dict):
+                      keys=sorted(row)
+                      print("RECORD",i,"KEYS=",keys)
+                      suspicious=[k for k in keys if re.search(r"(?i)(secret|token|password|credential|api.?key|private|session|access)",k)]
+                      print("RECORD",i,"SUSPICIOUS_KEYS=",suspicious)
+          PY
