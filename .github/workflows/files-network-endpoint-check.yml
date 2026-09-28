@@ -1,0 +1,17 @@
+name: Files.com Network Endpoint Check
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-network-endpoint-check.yml"
+  workflow_dispatch:
+
+jobs:
+  net:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve app.files.com
+        run: |
+          set -e
+          getent ahostsv4 app.files.com | awk '{print $1}' | sort -u
+          curl -sS -I --max-time 10 https://app.files.com/ | head -n 8
