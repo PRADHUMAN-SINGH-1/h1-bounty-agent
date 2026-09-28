@@ -36,6 +36,12 @@ services:
         sync: false
       - key: AUTHZ_HEADER_B
         sync: false
+      - key: FILES_BASE_URL
+        value: "https://bugbountytrialcompany1219.files.com"
+      - key: FILES_AUTHZ_TRIAL_PROBE
+        value: "true"
+      - key: FILES_AUTHZ_ESCALATION_TEST
+        value: "true"
       - key: AUTHZ_MAX_ENDPOINTS
         value: "30"
       - key: ALLOW_STATE_CHANGING_TESTS
