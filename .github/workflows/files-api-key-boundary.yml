@@ -1,0 +1,93 @@
+name: Files API Key Boundary Test
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-api-key-boundary.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env:
+      BASE: https://bugbountytrialcompany1219.files.com
+      KEY: ${{ secrets.FILES_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run bounded read-only authorization checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${KEY:-}" ]; then
+            echo "FILES_API_KEY secret is not configured; no authenticated test can be run."
+            printf '{"status":"skipped","reason":"FILES_API_KEY secret not configured"}\n' > files-api-key-test.json
+            exit 0
+          fi
+
+          endpoints=(
+            "api_key"
+            "users"
+            "permissions"
+            "public_keys"
+            "custom_domains"
+            "workspaces"
+            "event_targets"
+            "history"
+            "sso_events"
+            "user_lifecycle_rules"
+          )
+
+          {
+            printf '{"target":"%s","results":[' "$BASE"
+            first=1
+            for endpoint in "${endpoints[@]}"; do
+              url="$BASE/api/rest/v1/$endpoint.json"
+              status=$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}'                 -H "X-FilesAPI-Key: $KEY"                 -H "Accept: application/json"                 "$url" || printf '000')
+              [ $first -eq 1 ] || printf ','
+              first=0
+              printf '{"endpoint":"%s","status":%s}' "$endpoint" "$status"
+              sleep 1
+            done
+            printf ']}\n'
+          } > files-api-key-test.json
+
+          cat files-api-key-test.json
+
+      - name: Flag only a demonstrated authorization-boundary candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path("files-api-key-test.json")
+          data = json.loads(p.read_text())
+
+          if data.get("status") == "skipped":
+              print("No key available; nothing to validate.")
+              raise SystemExit(0)
+
+          allowed = {"api_key"}
+          unexpected = [
+              x for x in data.get("results", [])
+              if x.get("endpoint") not in allowed and 200 <= int(x.get("status", 0)) < 300
+          ]
+
+          if unexpected:
+              print("DEMONSTRATED_API_AUTHORIZATION_CANDIDATE")
+              for item in unexpected:
+                  print(item)
+              raise SystemExit(1)
+
+          print("No documented Files Only authorization-boundary bypass demonstrated.")
+          PY
+
+      - name: Upload redacted evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-api-key-boundary-test
+          path: files-api-key-test.json
