@@ -1,0 +1,46 @@
+name: Files.com Object Reference Authorization Check
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-object-idor-check.yml"
+  workflow_dispatch:
+
+jobs:
+  idor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe fixed object references without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://app.files.com/api/rest/v1"
+          targets=(
+            "users/1"
+            "api_keys/1"
+            "custom_domains/1"
+            "public_keys/1"
+            "workspaces/1"
+            "invoices/1"
+            "payments/1"
+            "secrets/1"
+            "sso_events/1"
+            "history/1"
+          )
+          for target in "${targets[@]}"; do
+            url="$base/$target.json"
+            code=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 12               -A "H1-Bounty-Agent/FilesCom-IDOR/1.0"               -o /tmp/object-body -w "%{http_code}" "$url" || true)
+            bytes=$(wc -c < /tmp/object-body 2>/dev/null || printf "0")
+            sha=$(sha256sum /tmp/object-body 2>/dev/null | cut -d' ' -f1 || true)
+            printf "OBJECT_REF target=%s status=%s bytes=%s sha256=%s\n" "$target" "$code" "$bytes" "$sha"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+              echo "OBJECT_REF_CANDIDATE target=$target"
+              # The response is intentionally not printed or uploaded. Delete it immediately.
+              rm -f /tmp/object-body
+              exit 42
+            fi
+            rm -f /tmp/object-body
+            sleep 1
+          done
+          echo "NO_UNAUTHENTICATED_OBJECT_REFERENCE_ACCESS"
