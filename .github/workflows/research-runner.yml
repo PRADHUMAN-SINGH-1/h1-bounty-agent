@@ -50,6 +50,34 @@ jobs:
           echo "Render has not deployed $GITHUB_SHA."
           exit 1
 
+      - name: Run one-time Files.com trial authorization probe
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          response=$(curl --fail-with-body --silent --show-error --max-time 45 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$H1_AGENT_URL/api/cron/files-authz-probe?escalate=1")
+          printf '%s\n' "$response" | tee files-authz-probe.json
+          candidate=$(python - <<'PY'
+          import json
+          p=json.load(open("files-authz-probe.json",encoding="utf-8"))
+          print("yes" if p.get("candidate") else "no")
+          PY
+          )
+          echo "Files.com authorization candidate: $candidate"
+          if [ "$candidate" = "yes" ]; then
+            echo "DEMONSTRATED_FILES_API_AUTHZ_CANDIDATE"
+            exit 42
+          fi
+
+      - name: Upload Files.com authorization probe
+        if: always() && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: filescom-authorized-trial-probe
+          path: files-authz-probe.json
+
       - name: Snapshot findings
         run: |
           set -euo pipefail
