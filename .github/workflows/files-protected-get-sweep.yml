@@ -1,0 +1,103 @@
+name: Files.com Protected GET Sweep
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-protected-get-sweep.yml"
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test documented authenticated GET resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, re, subprocess, time
+          from pathlib import Path
+
+          base="https://app.files.com"
+          resources=[
+            "users","permissions","api_keys","custom_domains","workspaces",
+            "event_targets","history","sso_events","sftp_host_keys",
+            "user_lifecycle_rules","remote_servers","public_keys",
+            "partner_site_requests","inbox_recipients","scim_logs",
+            "user_sftp_client_uses","settings_changes","apps","inbox_uploads",
+            "payments","invoices","email_logs","secrets","requests",
+            "share_groups","group_users","holiday_calendars","chat_sessions",
+            "snapshots","bundle_recipients","restores","inbox_registrations",
+            "user_cipher_uses","styles","file_comments","event_channels",
+            "form_field_sets","external_events","dns_records","behaviors"
+          ]
+          rows=[]
+          protected=set(resources)
+
+          for name in resources:
+            url=f"{base}/api/rest/v1/{name}.json"
+            p=subprocess.run(
+              ["curl","-sS","--max-redirs","0","--connect-timeout","6","--max-time","10",
+               "-A","H1-Bounty-Agent/FilesCom-ProtectedGET/1.0",
+               "-D","/tmp/h","-o","/tmp/b",url],
+              text=True,capture_output=True
+            )
+            h=Path("/tmp/h").read_text(errors="replace") if Path("/tmp/h").exists() else ""
+            b=Path("/tmp/b").read_text(errors="replace") if Path("/tmp/b").exists() else ""
+            statuses=re.findall(r"^HTTP/[^ ]+\s+(\d+)",h,re.M)
+            status=int(statuses[-1]) if statuses else 0
+            ct=next((x.split(":",1)[1].strip() for x in h.splitlines()
+                     if x.lower().startswith("content-type:")),"")
+            row={
+              "resource":name,"url":url,"status":status,"content_type":ct,
+              "bytes":len(b),
+              "sha256":hashlib.sha256(b.encode()).hexdigest() if b else "",
+              "json":False,"record_count":None
+            }
+            try:
+              data=json.loads(b)
+              row["json"]=True
+              if isinstance(data,list): row["record_count"]=len(data)
+            except Exception:
+              pass
+            rows.append(row)
+            print(json.dumps(row,ensure_ascii=False))
+            time.sleep(0.35)
+
+          Path("files-protected-get-sweep.json").write_text(json.dumps(rows,indent=2)+"\n")
+          hits=[
+            r for r in rows
+            if r["resource"] in protected
+            and 200 <= r["status"] < 300
+            and r["bytes"] > 0
+            and r["json"]
+            and (r["record_count"] is None or r["record_count"] > 0)
+          ]
+          if hits:
+            h=hits[0]
+            Path("files-protected-get-candidate.md").write_text(
+              "# Files.com unauthenticated protected GET candidate\n\n"
+              f"Endpoint: {h['url']}\n"
+              f"HTTP status: {h['status']}\n"
+              f"Response bytes: {h['bytes']}\n"
+              f"Response SHA256: {h['sha256']}\n"
+              f"JSON record count: {h['record_count']}\n\n"
+              "A protected-looking REST resource returned a non-empty JSON response without authentication. "
+              "The exact documented authorization requirement must be matched to this resource before submission.\n"
+            )
+            raise SystemExit(42)
+          Path("files-protected-get-candidate.md").write_text(
+            "# NO VERIFIED UNAUTHENTICATED PROTECTED GET\n\n"
+            "No tested resource returned a non-empty JSON record set without authentication.\n"
+          )
+          PY
+
+      - name: Upload sweep evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-protected-get-sweep
+          path: |
+            files-protected-get-sweep.json
+            files-protected-get-candidate.md
