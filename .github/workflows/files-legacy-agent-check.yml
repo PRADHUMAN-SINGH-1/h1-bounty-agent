@@ -1,0 +1,40 @@
+name: Files.com Legacy Agent Endpoint Check
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-legacy-agent-check.yml"
+  workflow_dispatch:
+
+jobs:
+  legacy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Probe removed agent configuration endpoint without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://app.files.com/api/rest/v1"
+          urls=(
+            "$base/remote_servers/1/configuration_file.json"
+            "$base/remote_servers/1/configuration_file"
+            "$base/remote_servers/1/files_agent_api_token.json"
+            "$base/remote_servers/1/files_agent_api_token"
+          )
+          methods=(POST POST GET GET)
+          for i in 0 1 2 3; do
+            url="${urls[$i]}"; method="${methods[$i]}"
+            code=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 15               -X "$method"               -H "Accept: application/json"               -H "Content-Type: application/json"               -d '{}'               -o /tmp/legacy-body -w "%{http_code}" "$url" || true)
+            bytes=$(wc -c < /tmp/legacy-body 2>/dev/null || printf "0")
+            sha=$(sha256sum /tmp/legacy-body 2>/dev/null | cut -d' ' -f1 || true)
+            printf "LEGACY_AGENT endpoint=%s method=%s status=%s bytes=%s sha256=%s\n" "$url" "$method" "$code" "$bytes" "$sha"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+              echo "LEGACY_AGENT_CANDIDATE"
+              head -c 1000 /tmp/legacy-body || true
+              exit 42
+            fi
+            rm -f /tmp/legacy-body
+            sleep 1
+          done
+          echo "NO_ANONYMOUS_LEGACY_AGENT_EXPOSURE"
