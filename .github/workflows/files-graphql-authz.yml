@@ -1,0 +1,50 @@
+name: Files.com GraphQL Authorization Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-graphql-authz.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe discovered and common GraphQL endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          endpoints=(
+            "https://app.files.com/graphql"
+            "https://app.files.com/api/graphql"
+            "https://app.files.com/api/rest/v1/graphql"
+            "https://app.files.com/graphql.json"
+            "https://app.files.com/api/graphql.json"
+          )
+
+          query='{"query":"{__typename}"}'
+          introspection='{"query":"query IntrospectionQuery { __schema { queryType { name } types { name } } }"}'
+
+          for url in "${endpoints[@]}"; do
+            echo "=== $url ==="
+            code=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 15               -X POST -H "Accept: application/json" -H "Content-Type: application/json"               -d "$query" -o /tmp/gql-body -w "%{http_code}" "$url" || true)
+            bytes=$(wc -c < /tmp/gql-body 2>/dev/null || printf '0')
+            sha=$(sha256sum /tmp/gql-body 2>/dev/null | cut -d' ' -f1 || true)
+            echo "GQL_STATUS=$code GQL_BYTES=$bytes GQL_SHA256=$sha"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+              echo "GQL_TYPENAME_BODY=$(head -c 1200 /tmp/gql-body)"
+              intro_code=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 15                 -X POST -H "Accept: application/json" -H "Content-Type: application/json"                 -d "$introspection" -o /tmp/gql-intro -w "%{http_code}" "$url" || true)
+              intro_bytes=$(wc -c < /tmp/gql-intro 2>/dev/null || printf '0')
+              intro_sha=$(sha256sum /tmp/gql-intro 2>/dev/null | cut -d' ' -f1 || true)
+              echo "GQL_INTROSPECTION_STATUS=$intro_code GQL_INTROSPECTION_BYTES=$intro_bytes GQL_INTROSPECTION_SHA256=$intro_sha"
+              if [ "$intro_code" -ge 200 ] && [ "$intro_code" -lt 300 ] && [ "$intro_bytes" -gt 0 ]; then
+                echo "GQL_INTROSPECTION_CANDIDATE=$url"
+              fi
+            fi
+            rm -f /tmp/gql-body /tmp/gql-intro
+          done
