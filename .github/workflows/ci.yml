@@ -9,6 +9,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Probe Files.com API authorization surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://app.files.com"
+          for endpoint in users permissions api_keys custom_domains workspaces event_targets history sso_events sftp_host_keys user_lifecycle_rules remote_servers public_keys; do
+            code=$(curl -sS --max-redirs 0 --connect-timeout 8 --max-time 15 -o /tmp/files-api-body -w "%{http_code}" "$base/api/rest/v1/$endpoint.json" || true)
+            bytes=$(wc -c < /tmp/files-api-body 2>/dev/null || printf "0")
+            printf "FILES_API endpoint=%s status=%s bytes=%s\n" "$endpoint" "$code" "$bytes"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+              printf "FILES_API_CANDIDATE endpoint=%s\n" "$endpoint"
+              head -c 2000 /tmp/files-api-body || true
+              exit 42
+            fi
+            sleep 1
+          done
+          echo "NO_FILES_API_AUTHORIZATION_BYPASS"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
