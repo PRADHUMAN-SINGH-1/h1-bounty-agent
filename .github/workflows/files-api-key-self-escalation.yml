@@ -25,7 +25,7 @@ jobs:
           set +x
 
           key=""
-          for candidate in "$K1" "$K2" "$K3" "$K4" "$K5"; do
+          for candidate in "$K1" "$K2" "$K3" "$K4" "$K5" "$VK1" "$VK2"; do
             if [ -n "$candidate" ]; then
               key="$candidate"
               break
