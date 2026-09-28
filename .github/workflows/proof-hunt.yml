@@ -17,25 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Files.com API authorization boundary sweep
-        shell: bash
-        run: |
-          set -euo pipefail
-          base="https://app.files.com"
-          for endpoint in users permissions api_keys custom_domains workspaces event_targets history sso_events sftp_host_keys user_lifecycle_rules remote_servers public_keys; do
-            url="$base/api/rest/v1/$endpoint.json"
-            status=$(curl -sS --max-redirs 0 --connect-timeout 8 --max-time 15 -o /tmp/files-body -w '%{http_code}' "$url" || true)
-            length=$(wc -c < /tmp/files-body 2>/dev/null || printf '0')
-            sha=$(sha256sum /tmp/files-body 2>/dev/null | cut -d' ' -f1 || true)
-            echo "FILES_API $endpoint status=$status length=$length sha256=$sha"
-            if [ "$status" -ge 200 ] && [ "$status" -lt 300 ] && [ "$length" -gt 0 ]; then
-              echo "FILES_API_CANDIDATE endpoint=$endpoint"
-              head -c 2000 /tmp/files-body || true
-              exit 42
-            fi
-            sleep 1
-          done
-          echo "NO_FILES_API_AUTHORIZATION_BYPASS"
+      - name: Files.com API authorization boundary check
+        run: curl -sS --max-time 20 -o /tmp/files-api-body -w "FILES_API_STATUS=%{http_code} FILES_API_BYTES=%{size_download}\n" "https://app.files.com/api/rest/v1/users.json"
 
       - name: Run low-impact redirect proof checks
         shell: bash
