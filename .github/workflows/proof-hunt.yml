@@ -138,6 +138,96 @@ An external destination supplied by an unauthenticated caller should not be acce
             ctf-backend-results.json
             ctf-backend-report.md
 
+      - name: Sweep in-scope Files.com API authorization without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, re, subprocess, time
+          from pathlib import Path
+
+          base = "https://app.files.com"
+          targets = [
+              ("users","/api/rest/v1/users.json"),
+              ("permissions","/api/rest/v1/permissions.json"),
+              ("api_keys","/api/rest/v1/api_keys.json"),
+              ("custom_domains","/api/rest/v1/custom_domains.json"),
+              ("workspaces","/api/rest/v1/workspaces.json"),
+              ("event_targets","/api/rest/v1/event_targets.json"),
+              ("history","/api/rest/v1/history.json"),
+              ("sso_events","/api/rest/v1/sso_events.json"),
+              ("sftp_host_keys","/api/rest/v1/sftp_host_keys.json"),
+              ("user_lifecycle_rules","/api/rest/v1/user_lifecycle_rules.json"),
+              ("remote_servers","/api/rest/v1/remote_servers.json"),
+              ("public_keys","/api/rest/v1/public_keys.json"),
+          ]
+          protected = set(name for name,_ in targets)
+          rows=[]
+          for name,path in targets:
+              url=base+path
+              p=subprocess.run(
+                  ["curl","-sS","--max-redirs","0","--connect-timeout","8","--max-time","15",
+                   "-A","H1-Bounty-Agent/0.4","-D","/tmp/fh","-o","/tmp/fb",url],
+                  text=True,capture_output=True
+              )
+              h=Path("/tmp/fh").read_text(errors="replace") if Path("/tmp/fh").exists() else ""
+              b=Path("/tmp/fb").read_text(errors="replace") if Path("/tmp/fb").exists() else ""
+              statuses=re.findall(r"^HTTP/[^ ]+\s+(\d+)",h,re.M)
+              status=int(statuses[-1]) if statuses else 0
+              ct=next((x.split(":",1)[1].strip() for x in h.splitlines() if x.lower().startswith("content-type:")),"")
+              row={"endpoint":name,"url":url,"status":status,"content_type":ct,"length":len(b),
+                   "response_sha256":hashlib.sha256(b.encode()).hexdigest() if b else "",
+                   "json":False,"json_type":None,"record_count":None}
+              try:
+                  data=json.loads(b)
+                  row["json"]=True
+                  row["json_type"]=type(data).__name__
+                  if isinstance(data,list):
+                      row["record_count"]=len(data)
+              except Exception:
+                  pass
+              rows.append(row)
+              print(json.dumps(row))
+              time.sleep(1.05)
+
+          Path("filescom-unauth-api-sweep.json").write_text(json.dumps(rows,indent=2)+"\n")
+          candidates=[
+              r for r in rows
+              if r["endpoint"] in protected and 200 <= r["status"] < 300
+              and r["length"] > 0 and r["json"]
+              and (r["record_count"] is None or r["record_count"] > 0)
+          ]
+
+          if candidates:
+              c=candidates[0]
+              Path("filescom-api-candidate.md").write_text(
+                  "# Candidate: unauthenticated Files.com API authorization bypass\n\n"
+                  "Endpoint: "+c["url"]+"\n"
+                  "HTTP status: "+str(c["status"])+"\n"
+                  "Content-Type: "+c["content_type"]+"\n"
+                  "Response length: "+str(c["length"])+" bytes\n"
+                  "Response SHA256: "+c["response_sha256"]+"\n\n"
+                  "A protected API endpoint returned a non-empty JSON response without authentication. "
+                  "Current Files.com authorization documentation must be cited and the returned record "
+                  "must be reviewed before this becomes a submission-ready finding.\n"
+              )
+              print("FILES_API_CANDIDATE")
+          else:
+              Path("filescom-api-candidate.md").write_text(
+                  "# NO VERIFIED FILES.COM API AUTHORIZATION BYPASS\n\n"
+                  "No tested protected endpoint returned a non-empty JSON record set without authentication.\n"
+              )
+              print("NO_FILES_API_CANDIDATE")
+          PY
+
+      - name: Upload Files.com API sweep evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: filescom-unauth-api-sweep
+          path: |
+            filescom-unauth-api-sweep.json
+            filescom-api-candidate.md
+
       - name: Upload proof and report
         uses: actions/upload-artifact@v4
         with:
