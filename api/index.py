@@ -596,8 +596,28 @@ def files_authz_probe(request: Request, authorization: str | None = Header(defau
 
     if not base:
         return {"status": "skipped", "reason": "FILES_BASE_URL is not configured"}
+
+    # Accept a researcher-provided Files.com API key through a private deployment
+    # environment only. The value is never returned, logged, or stored.
+    key_env_names = (
+        "FILES_API_KEY",
+        "FILESCOM_API_KEY",
+        "BUGBOUNTY_FILES_API_KEY",
+        "FILES_BUGBOUNTY_API_KEY",
+        "FILESCOM_BUGBOUNTY_API_KEY",
+        "H1_FILES_API_KEY",
+        "H1_FILESCOM_API_KEY",
+    )
+    private_api_key = next((os.getenv(name, "").strip() for name in key_env_names if os.getenv(name, "").strip()), "")
+    if private_api_key and not raw_a:
+        raw_a = f"X-FilesAPI-Key: {private_api_key}"
+
     if not raw_a:
-        return {"status": "skipped", "reason": "AUTHZ_HEADER_A is not configured"}
+        return {
+            "status": "skipped",
+            "reason": "No configured Files.com authorization context was found",
+            "checked_env_names": list(key_env_names) + ["AUTHZ_HEADER_A"],
+        }
 
     import httpx
     from urllib.parse import urlparse
