@@ -1,0 +1,53 @@
+name: Files.com Public Apps Secret Pattern Check
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-public-apps-pattern-check.yml"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check public Apps catalogue for credential-like values
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --max-time 15 https://app.files.com/api/rest/v1/apps.json -o /tmp/apps.json
+          python3 - <<'PY'
+          import hashlib,json,re
+          from pathlib import Path
+          b=Path("/tmp/apps.json").read_bytes()
+          text=b.decode("utf-8","replace")
+          data=json.loads(text)
+          rows=data if isinstance(data,list) else data.get("data") or data.get("apps") or []
+          patterns={
+            "aws_access_key":r"AKIA[0-9A-Z]{16}",
+            "private_key":r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+            "bearer_token":r"(?i)bearer\s+[A-Za-z0-9._-]{20,}",
+            "client_secret":r"(?i)(client[_-]?secret|secret[_-]?key)\s*[:=]",
+            "password_field":r"(?i)password\s*[:=]",
+            "api_key_field":r"(?i)(api[_-]?key|access[_-]?token)\s*[:=]\s*[A-Za-z0-9._-]{16,}",
+            "internal_hostname":r"(?i)(?:https?://)?(?:[A-Za-z0-9-]+\.)*(?:internal|corp|localhost|127\.0\.0\.1)(?::\d+)?"
+          }
+          print("record_count=",len(rows) if isinstance(rows,list) else "unknown")
+          print("response_sha256=",hashlib.sha256(b).hexdigest())
+          for label,p in patterns.items():
+            matches=re.findall(p,text)
+            print(label+"_matches=",len(matches))
+          suspicious=[]
+          if isinstance(rows,list):
+            for i,row in enumerate(rows):
+              if not isinstance(row,dict): continue
+              blob=json.dumps(row,ensure_ascii=False)
+              found=[label for label,p in patterns.items() if re.search(p,blob)]
+              if found:
+                suspicious.append((i,found))
+          print("suspicious_records=",suspicious[:20])
+          if suspicious:
+            print("PUBLIC_APPS_SECRET_PATTERN_CANDIDATE")
+            raise SystemExit(42)
+          print("NO_CREDENTIAL_PATTERN_IN_PUBLIC_APPS_CATALOGUE")
+          PY
