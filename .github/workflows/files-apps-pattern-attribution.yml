@@ -1,0 +1,60 @@
+name: Files.com Apps Pattern Source Attribution
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-apps-pattern-attribution.yml"
+  workflow_dispatch:
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Attribute credential-pattern matches to public fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --max-time 15 https://app.files.com/api/rest/v1/apps.json -o /tmp/apps.json
+          python3 - <<'PY'
+          import json,re
+          data=json.load(open("/tmp/apps.json"))
+          rows=data if isinstance(data,list) else data.get("data") or data.get("apps") or []
+          patterns={
+            "aws_access_key":re.compile(r"AKIA[0-9A-Z]{16}"),
+            "private_key":re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+            "bearer_token":re.compile(r"(?i)bearer\s+[A-Za-z0-9._-]{20,}"),
+            "client_secret":re.compile(r"(?i)(client[_-]?secret|secret[_-]?key)\s*[:=]"),
+            "password_field":re.compile(r"(?i)password\s*[:=]"),
+            "api_key_field":re.compile(r"(?i)(api[_-]?key|access[_-]?token)\s*[:=]\s*[A-Za-z0-9._-]{16,}"),
+            "internal_hostname":re.compile(r"(?i)(?:https?://)?(?:[A-Za-z0-9-]+\.)*(?:internal|corp|localhost|127\.0\.0\.1)(?::\d+)?")
+          }
+          def walk(v,path=""):
+            if isinstance(v,dict):
+              for k,val in v.items():
+                yield from walk(val, path+"."+str(k) if path else str(k))
+            elif isinstance(v,list):
+              for i,val in enumerate(v[:50]):
+                yield from walk(val, f"{path}[{i}]")
+            else:
+              yield path, str(v)
+          counts={}
+          examples={}
+          for i,row in enumerate(rows):
+            matches=[]
+            for path,val in walk(row):
+              for label,rx in patterns.items():
+                if rx.search(val):
+                  matches.append((label,path))
+            if matches:
+              for label,path in matches:
+                counts[(label,path)]=counts.get((label,path),0)+1
+              examples[i]=matches[:30]
+          print("PATTERN_FIELD_COUNTS")
+          for (label,path),count in sorted(counts.items()):
+            print(f"{label} field={path} record_matches={count}")
+          print("FIRST_RECORD_FIELD_PATHS_ONLY")
+          for i,m in list(examples.items())[:20]:
+            print("record",i,"paths_and_patterns=",m)
+          print("Values intentionally withheld.")
+          PY
