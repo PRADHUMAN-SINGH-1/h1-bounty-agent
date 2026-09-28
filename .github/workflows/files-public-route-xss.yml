@@ -41,7 +41,12 @@ jobs:
           PY
 
           payload='<img src=x onerror="document.documentElement.setAttribute(&quot;data-h1xss&quot;,&quot;1&quot;)">'
-          enc=$(python3 -c 'import urllib.parse; print(urllib.parse.quote('"'"'$payload'"'"'"'"'"',safe=""))')
+          enc=$(python3 - <<'PY'
+          import urllib.parse
+          payload = '<img src=x onerror="document.documentElement.setAttribute(\'data-h1xss\',\'1\')">'
+          print(urllib.parse.quote(payload, safe=""))
+          PY
+          )
           : > public-route-evidence/results.txt
           findings=0
           while IFS= read -r base; do
