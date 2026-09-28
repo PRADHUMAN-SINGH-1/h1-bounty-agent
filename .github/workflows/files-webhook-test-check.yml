@@ -1,0 +1,50 @@
+name: Files.com Webhook Test Authorization Check
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-webhook-test-check.yml"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Test webhook test endpoint without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --max-redirs 0 --connect-timeout 8 --max-time 15             -X POST             -H "Accept: application/json"             -H "Content-Type: application/json"             -d '{"url":"https://example.com/","method":"GET","encoding":"JSON","body":{"h1_canary":"files-bounty-probe"}}'             -D /tmp/webhook-headers -o /tmp/webhook-body             -w "WEBHOOK_TEST_STATUS=%{http_code} WEBHOOK_TEST_BYTES=%{size_download}
+"             "https://app.files.com/api/rest/v1/webhook_tests.json"
+
+          status=$(awk 'toupper($1) ~ /^HTTP\// {code=$2} END {print code+0}' /tmp/webhook-headers)
+          bytes=$(wc -c < /tmp/webhook-body)
+          sha=$(sha256sum /tmp/webhook-body | cut -d' ' -f1)
+          echo "WEBHOOK_TEST_STATUS=$status"
+          echo "WEBHOOK_TEST_BYTES=$bytes"
+          echo "WEBHOOK_TEST_SHA256=$sha"
+
+          python3 - <<'PY'
+          import json,re
+          b=open('/tmp/webhook-body',encoding='utf-8',errors='replace').read()
+          try:
+              x=json.loads(b)
+              print("WEBHOOK_JSON_KEYS=",sorted(x) if isinstance(x,dict) else type(x).__name__)
+              if isinstance(x,dict):
+                  print("WEBHOOK_SUCCESS=",x.get("success"))
+                  print("WEBHOOK_CODE=",x.get("code"))
+                  print("WEBHOOK_MESSAGE=",str(x.get("message",""))[:300])
+                  print("WEBHOOK_URL_ECHO=",x.get("url"))
+                  print("WEBHOOK_STATUS_ECHO=",x.get("status"))
+                  print("WEBHOOK_DATA_TYPE=",type(x.get("data")).__name__)
+          except Exception:
+              print("WEBHOOK_NON_JSON_RESPONSE")
+          PY
+
+          if [ "$status" -ge 200 ] && [ "$status" -lt 300 ]; then
+            echo "UNAUTHENTICATED_WEBHOOK_TEST_CANDIDATE"
+            exit 42
+          fi
+
+          echo "NO_UNAUTHENTICATED_WEBHOOK_TEST_ACCESS"
