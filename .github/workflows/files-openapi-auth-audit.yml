@@ -1,0 +1,155 @@
+name: Files.com OpenAPI Authorization Audit
+
+on:
+  push:
+    paths:
+      - ".github/workflows/files-openapi-auth-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch public OpenAPI candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+
+          base="https://app.files.com"
+          paths=[
+            "/api/rest/v1/openapi.json",
+            "/api/rest/v1/swagger.json",
+            "/api-docs",
+            "/openapi.json",
+            "/swagger.json",
+          ]
+
+          found=None
+          for p in paths:
+            r=subprocess.run(
+              ["curl","-sS","--max-redirs","0","--connect-timeout","7","--max-time","15",
+               "-H","Accept: application/json", "-o","/tmp/spec", "-w","%{http_code}",
+               base+p],
+              text=True,capture_output=True
+            )
+            code=int(r.stdout or 0)
+            body=Path("/tmp/spec").read_text(errors="replace") if Path("/tmp/spec").exists() else ""
+            print("SPEC",p,"status=",code,"bytes=",len(body))
+            if code == 200:
+              try:
+                data=json.loads(body)
+              except Exception:
+                continue
+              if isinstance(data,dict) and ("paths" in data or "openapi" in data or "swagger" in data):
+                found=(p,data)
+                break
+
+          if not found:
+            Path("files-openapi-auth-audit.json").write_text(json.dumps({"status":"no_public_openapi_found"},indent=2))
+            print("NO_PUBLIC_OPENAPI_FOUND")
+            raise SystemExit(0)
+
+          path,data=found
+          Path("/tmp/openapi.json").write_text(json.dumps(data))
+          candidates=[]
+          for route,methods in (data.get("paths") or {}).items():
+            for method,op in (methods or {}).items():
+              if method.lower() != "get" or not isinstance(op,dict):
+                continue
+              sec=op.get("security", "__missing__")
+              tags=" ".join(str(x) for x in op.get("tags",[]))
+              summary=str(op.get("summary",""))+" "+str(op.get("description",""))
+              blob=(route+" "+tags+" "+summary).lower()
+              interesting=any(k in blob for k in [
+                "user","account","api_key","permission","group","workspace","history",
+                "secret","token","credential","public_key","sso","webhook","event",
+                "billing","domain","security","encryption","automation","remote_server"
+              ])
+              if sec == [] or (sec == "__missing__" and interesting):
+                candidates.append({"method":"GET","path":route,"security":sec,"summary":summary[:300],"tags":op.get("tags",[])})
+          out={"spec_path":path,"candidate_count":len(candidates),"candidates":candidates[:300]}
+          Path("files-openapi-auth-audit.json").write_text(json.dumps(out,indent=2))
+          print("OPENAPI_CANDIDATES=",len(candidates))
+          for x in candidates[:100]:
+            print(json.dumps(x,ensure_ascii=False))
+          PY
+
+      - name: Test candidate GETs without authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f files-openapi-auth-audit.json
+          python3 - <<'PY'
+          import hashlib, json, re, subprocess, time, urllib.parse
+          from pathlib import Path
+
+          audit=json.load(open("files-openapi-auth-audit.json"))
+          if audit.get("status") == "no_public_openapi_found":
+            Path("files-openapi-auth-results.json").write_text(json.dumps(audit,indent=2))
+            raise SystemExit(0)
+
+          candidates=audit.get("candidates") or []
+          base="https://app.files.com"
+          rows=[]
+          seen=set()
+
+          for item in candidates[:180]:
+            route=item.get("path","")
+            if not isinstance(route,str) or not route.startswith("/") or route in seen:
+              continue
+            seen.add(route)
+
+            url=base+route
+            p=subprocess.run(
+              ["curl","-sS","--max-redirs","0","--connect-timeout","6","--max-time","12",
+               "-A","H1-Bounty-Agent/FilesCom-OpenAPI-AuthAudit/1.0",
+               "-H","Accept: application/json","-D","/tmp/h","-o","/tmp/b",url],
+              text=True,capture_output=True
+            )
+            h=Path("/tmp/h").read_text(errors="replace") if Path("/tmp/h").exists() else ""
+            b=Path("/tmp/b").read_text(errors="replace") if Path("/tmp/b").exists() else ""
+            statuses=re.findall(r"^HTTP/[^ ]+\s+(\d+)",h,re.M)
+            status=int(statuses[-1]) if statuses else 0
+            ct=next((z.split(":",1)[1].strip() for z in h.splitlines() if z.lower().startswith("content-type:")),"")
+            row={
+              "path":route,"status":status,"bytes":len(b),
+              "content_type":ct,"sha256":hashlib.sha256(b.encode()).hexdigest() if b else "",
+              "security":item.get("security"),"summary":item.get("summary",""),
+            }
+            try:
+              data=json.loads(b)
+              row["json"]=True
+              row["type"]=type(data).__name__
+              row["record_count"]=len(data) if isinstance(data,list) else None
+            except Exception:
+              row["json"]=False
+              row["type"]=None
+              row["record_count"]=None
+            rows.append(row)
+            print(json.dumps(row,ensure_ascii=False))
+            if 200 <= status < 300 and len(b)>0 and (row["record_count"] is None or row["record_count"]>0):
+              print("OPENAPI_UNAUTHENTICATED_CANDIDATE",route)
+              Path("files-openapi-auth-results.json").write_text(json.dumps(rows,indent=2))
+              raise SystemExit(42)
+            time.sleep(1.0)
+
+          Path("files-openapi-auth-results.json").write_text(json.dumps(rows,indent=2))
+          print("NO_OPENAPI_UNAUTHENTICATED_AUTHZ_BYPASS")
+          PY
+
+      - name: Upload OpenAPI authorization evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: files-openapi-authorization-audit
+          path: |
+            files-openapi-auth-audit.json
+            files-openapi-auth-results.json
